@@ -8,14 +8,11 @@ import drivers.ssd1306_128x32::*
 const MESSAGE: u8[] = "Hello, world!"
 const DISPLAY_CHARS: i32 = 15
 const TOTAL_CHARS: i32 = 13
-const INIT_LOCATION: i32 = 0 
 
 fun main()
-    // init I2C and open device
     val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
     val dev: i32 = i2c_open(bus, OLED_ADDR)
 
-    // wire display → gfx
     val conn: &DisplayConn = display_conn()
     conn.interface      = DisplayInterface.I2C
     conn.device         = dev
@@ -35,19 +32,14 @@ fun main()
         gfx_fill_rect(1, 1, 126, 30, 0)
         if location < 0
             first_char = -location
-            char_len = TOTAL_CHARS - first_char
-            x = get_location_x(0)
+            char_len = TOTAL_CHARS + location
+            x = 4
         else
             first_char = 0
             char_len = min<i32>(DISPLAY_CHARS - location, TOTAL_CHARS)
-            x = get_location_x(location)
+            x = location * 8 + 4
         gfx_str(x, 12, {&MESSAGE[first_char], char_len}, 1, 0, 1)
         location -= 1
         if location < -TOTAL_CHARS + 1
             location = DISPLAY_CHARS - 1
-
         delay_ms(300)
-
-@inline
-fun get_location_x(char_location: i32) i32
-    return char_location * 8 + 4

@@ -475,7 +475,6 @@ struct DisplayInfo {
 };
 
 void main__main(void);
-static inline int32_t main__get_location_x(int32_t char_location);
 int32_t i2c__i2c_init(int32_t bus, int32_t sda, int32_t scl, int32_t freq_hz);
 int32_t i2c__i2c_open(int32_t bus, int32_t addr);
 void i2c__i2c_close(int32_t dev);
@@ -535,7 +534,6 @@ static inline int32_t math__min_int32_t(int32_t a, int32_t b);
 const __Slice_uint8_t main__MESSAGE = (__Slice_uint8_t){(uint8_t*)"Hello, world!", sizeof("Hello, world!") - 1};
 const int32_t main__DISPLAY_CHARS = 15;
 const int32_t main__TOTAL_CHARS = 13;
-const int32_t main__INIT_LOCATION = 0;
 static GfxDriver gfx___driver;
 static int32_t gfx___view_w;
 static int32_t gfx___view_h;
@@ -564,24 +562,20 @@ void main__main(void) {
     gfx__gfx_fill_rect(1, 1, 126, 30, 0);
     if ((location < 0)) {
       (first_char = (-location));
-      (char_len = (main__TOTAL_CHARS - first_char));
-      (x = main__get_location_x(0));
+      (char_len = (main__TOTAL_CHARS + location));
+      (x = 4);
     } else {
       (first_char = 0);
       (char_len = math__min_int32_t((main__DISPLAY_CHARS - location), main__TOTAL_CHARS));
-      (x = main__get_location_x(location));
+      (x = ((location * 8) + 4));
     }
     gfx__gfx_str(x, 12, (__Slice_uint8_t){(&main__MESSAGE.ptr[first_char]), char_len}, 1, 0, 1);
-    __mp_delay_ms(500);
     (location -= 1);
     if ((location < ((-main__TOTAL_CHARS) + 1))) {
       (location = (main__DISPLAY_CHARS - 1));
     }
+    __mp_delay_ms(300);
   }
-}
-
-static inline int32_t main__get_location_x(int32_t char_location) {
-  return ((char_location * 8) + 4);
 }
 
 int32_t i2c__i2c_init(int32_t bus, int32_t sda, int32_t scl, int32_t freq_hz) {
