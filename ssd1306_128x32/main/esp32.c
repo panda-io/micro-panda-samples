@@ -529,10 +529,8 @@ void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver);
 void gpio__gpio_mode(int32_t pin, GpioMode mode);
 static inline void gpio__gpio_write(int32_t pin, GpioLevel value);
 static inline GpioLevel gpio__gpio_read(int32_t pin);
-static inline int32_t math__min_int32_t(int32_t a, int32_t b);
 
 const __Slice_uint8_t main__MESSAGE = (__Slice_uint8_t){(uint8_t*)"Hello, world!", sizeof("Hello, world!") - 1};
-const int32_t main__DISPLAY_CHARS = 15;
 const int32_t main__TOTAL_CHARS = 13;
 static GfxDriver gfx___driver;
 static int32_t gfx___view_w;
@@ -566,15 +564,15 @@ void main__main(void) {
       (x = 4);
     } else {
       (first_char = 0);
-      (char_len = math__min_int32_t((main__DISPLAY_CHARS - location), main__TOTAL_CHARS));
-      (x = ((location * 8) + 4));
+      (char_len = (main__TOTAL_CHARS - location));
+      (x = ((location * 9) + 4));
     }
     gfx__gfx_str(x, 12, (__Slice_uint8_t){(&main__MESSAGE.ptr[first_char]), char_len}, 1, 0, 1);
     (location -= 1);
     if ((location < ((-main__TOTAL_CHARS) + 1))) {
-      (location = (main__DISPLAY_CHARS - 1));
+      (location = (main__TOTAL_CHARS - 1));
     }
-    __mp_delay_ms(300);
+    __mp_delay_ms(200);
   }
 }
 
@@ -1105,13 +1103,6 @@ static inline void gpio__gpio_write(int32_t pin, GpioLevel value) {
 
 static inline GpioLevel gpio__gpio_read(int32_t pin) {
   return ((GpioLevel)(gpio_get_level(pin)));
-}
-
-static inline int32_t math__min_int32_t(int32_t a, int32_t b) {
-  if ((a < b)) {
-    return a;
-  }
-  return b;
 }
 
 void app_main(void) { main__main(); }
