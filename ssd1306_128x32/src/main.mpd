@@ -1,0 +1,34 @@
+import i2c::*
+import gfx::*
+import rtos::*
+import display::*
+import drivers.ssd1306_128x32::*
+
+
+fun app_main()
+    // init I2C and open device
+    var bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
+    var dev: i32 = i2c_open(bus, OLED_ADDR)
+
+    // wire display → gfx
+    var conn: &DisplayConn = display_conn()
+    conn.interface      = DisplayInterface.I2C
+    conn.device         = dev
+    conn.reset_pin      = -1
+    conn.back_light_pin = -1
+    display_attach_gfx(gfx_driver())
+    gfx_init()
+
+    // draw — each call sends framebuffer once via flush
+    gfx_clear(0)
+
+    gfx_rect(0, 0, 128, 32, 1)
+
+    var title: u8[] = "Hello, world!"
+    gfx_str(4, 4, title, 1, 0, 1)
+
+    var sub: u8[] = "OLED   128x32"
+    gfx_str(4, 20, sub, 1, 0, 1)
+
+    while true
+        delay_ms(1000)
