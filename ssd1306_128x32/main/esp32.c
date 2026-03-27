@@ -474,7 +474,8 @@ struct DisplayInfo {
   DisplayColor color;
 };
 
-void main__app_main(void);
+void main__main(void);
+static inline int32_t main__get_location_x(int32_t char_location);
 int32_t i2c__i2c_init(int32_t bus, int32_t sda, int32_t scl, int32_t freq_hz);
 int32_t i2c__i2c_open(int32_t bus, int32_t addr);
 void i2c__i2c_close(int32_t dev);
@@ -513,6 +514,9 @@ void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_
 static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
 void gfx__gfx_char(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
 int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int32_t bg, int32_t scale);
+static inline int32_t math__floor_fixed(int32_t v);
+static inline int32_t math__ceil_fixed(int32_t v);
+static inline int32_t math__round_fixed(int32_t v);
 DisplayConn* display__display_conn(void);
 DisplayInfo* display__display_info(void);
 static int32_t drivers__ssd1306_128x32___cmd1(int32_t dev, int32_t c);
@@ -526,7 +530,12 @@ void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver);
 void gpio__gpio_mode(int32_t pin, GpioMode mode);
 static inline void gpio__gpio_write(int32_t pin, GpioLevel value);
 static inline GpioLevel gpio__gpio_read(int32_t pin);
+static inline int32_t math__min_int32_t(int32_t a, int32_t b);
 
+const __Slice_uint8_t main__MESSAGE = (__Slice_uint8_t){(uint8_t*)"Hello, world!", sizeof("Hello, world!") - 1};
+const int32_t main__DISPLAY_CHARS = 15;
+const int32_t main__TOTAL_CHARS = 13;
+const int32_t main__INIT_LOCATION = 0;
 static GfxDriver gfx___driver;
 static int32_t gfx___view_w;
 static int32_t gfx___view_h;
@@ -535,7 +544,7 @@ static __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t gfx___fill_fn;
 static DisplayConn display___conn;
 static DisplayInfo display___info;
 
-void main__app_main(void) {
+void main__main(void) {
   int32_t bus = i2c__i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ);
   int32_t dev = i2c__i2c_open(bus, OLED_ADDR);
   DisplayConn* conn = display__display_conn();
@@ -547,13 +556,32 @@ void main__app_main(void) {
   gfx__gfx_init();
   gfx__gfx_clear(0);
   gfx__gfx_rect(0, 0, 128, 32, 1);
-  __Slice_uint8_t title = (__Slice_uint8_t){(uint8_t*)"Hello, world!", sizeof("Hello, world!") - 1};
-  gfx__gfx_str(4, 4, title, 1, 0, 1);
-  __Slice_uint8_t sub = (__Slice_uint8_t){(uint8_t*)"OLED   128x32", sizeof("OLED   128x32") - 1};
-  gfx__gfx_str(4, 20, sub, 1, 0, 1);
+  int32_t location = 0;
+  int32_t first_char = 0;
+  int32_t char_len = 0;
+  int32_t x = 0;
   while (true) {
-    __mp_delay_ms(1000);
+    gfx__gfx_fill_rect(1, 1, 126, 30, 0);
+    if ((location < 0)) {
+      (first_char = (-location));
+      (char_len = (main__TOTAL_CHARS - first_char));
+      (x = main__get_location_x(0));
+    } else {
+      (first_char = 0);
+      (char_len = math__min_int32_t((main__DISPLAY_CHARS - location), main__TOTAL_CHARS));
+      (x = main__get_location_x(location));
+    }
+    gfx__gfx_str(x, 12, (__Slice_uint8_t){(&main__MESSAGE.ptr[first_char]), char_len}, 1, 0, 1);
+    __mp_delay_ms(500);
+    (location -= 1);
+    if ((location < ((-main__TOTAL_CHARS) + 1))) {
+      (location = (main__DISPLAY_CHARS - 1));
+    }
   }
+}
+
+static inline int32_t main__get_location_x(int32_t char_location) {
+  return ((char_location * 8) + 4);
 }
 
 int32_t i2c__i2c_init(int32_t bus, int32_t sda, int32_t scl, int32_t freq_hz) {
@@ -956,6 +984,22 @@ int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int
   return cx;
 }
 
+static inline int32_t math__floor_fixed(int32_t v) {
+  return (v & (-65536));
+}
+
+static inline int32_t math__ceil_fixed(int32_t v) {
+  int32_t f = (v & (-65536));
+  if ((v != f)) {
+    return (f + 65536);
+  }
+  return f;
+}
+
+static inline int32_t math__round_fixed(int32_t v) {
+  return ((v + 32768) & (-65536));
+}
+
 DisplayConn* display__display_conn(void) {
   return (&display___conn);
 }
@@ -1069,5 +1113,12 @@ static inline GpioLevel gpio__gpio_read(int32_t pin) {
   return ((GpioLevel)(gpio_get_level(pin)));
 }
 
-void app_main(void) { main__app_main(); }
+static inline int32_t math__min_int32_t(int32_t a, int32_t b) {
+  if ((a < b)) {
+    return a;
+  }
+  return b;
+}
+
+void app_main(void) { main__main(); }
 

@@ -1,17 +1,22 @@
 import i2c::*
 import gfx::*
+import math::min
 import rtos::*
 import display::*
 import drivers.ssd1306_128x32::*
 
+const MESSAGE: u8[] = "Hello, world!"
+const DISPLAY_CHARS: i32 = 15
+const TOTAL_CHARS: i32 = 13
+const INIT_LOCATION: i32 = 0 
 
-fun app_main()
+fun main()
     // init I2C and open device
-    var bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
-    var dev: i32 = i2c_open(bus, OLED_ADDR)
+    val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
+    val dev: i32 = i2c_open(bus, OLED_ADDR)
 
     // wire display → gfx
-    var conn: &DisplayConn = display_conn()
+    val conn: &DisplayConn = display_conn()
     conn.interface      = DisplayInterface.I2C
     conn.device         = dev
     conn.reset_pin      = -1
@@ -19,16 +24,30 @@ fun app_main()
     display_attach_gfx(gfx_driver())
     gfx_init()
 
-    // draw — each call sends framebuffer once via flush
     gfx_clear(0)
-
     gfx_rect(0, 0, 128, 32, 1)
 
-    var title: u8[] = "Hello, world!"
-    gfx_str(4, 4, title, 1, 0, 1)
-
-    var sub: u8[] = "OLED   128x32"
-    gfx_str(4, 20, sub, 1, 0, 1)
-
+    var location: i32 = 0
+    var first_char: i32 = 0
+    var char_len: i32 = 0
+    var x: i32 = 0
     while true
-        delay_ms(1000)
+        gfx_fill_rect(1, 1, 126, 30, 0)
+        if location < 0
+            first_char = -location
+            char_len = TOTAL_CHARS - first_char
+            x = get_location_x(0)
+        else
+            first_char = 0
+            char_len = min<i32>(DISPLAY_CHARS - location, TOTAL_CHARS)
+            x = get_location_x(location)
+        gfx_str(x, 12, {&MESSAGE[first_char], char_len}, 1, 0, 1)
+        location -= 1
+        if location < -TOTAL_CHARS + 1
+            location = DISPLAY_CHARS - 1
+
+        delay_ms(300)
+
+@inline
+fun get_location_x(char_location: i32) i32
+    return char_location * 8 + 4
