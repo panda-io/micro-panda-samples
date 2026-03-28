@@ -5,7 +5,7 @@ import rtos::*
 import display::*
 import drivers.ssd1306_128x32::*
 
-const MESSAGE: u8[] = "Hello, world!"
+const MESSAGE: u8[] = "Hello, world!             "
 const TOTAL_CHARS: i32 = 13
 
 fun main()
@@ -25,20 +25,16 @@ fun main()
 
     var location: i32 = 0
     var first_char: i32 = 0
-    var char_len: i32 = 0
     var x: i32 = 0
     while true
-        gfx_fill_rect(1, 1, 126, 30, 0)
         if location < 0
             first_char = -location
-            char_len = TOTAL_CHARS + location
             x = 4
         else
             first_char = 0
-            char_len = TOTAL_CHARS - location
             x = location * 9 + 4
-        gfx_str(x, 12, {&MESSAGE[first_char], char_len}, 1, 0, 1)
+        gfx_str(x, 12, {&MESSAGE[first_char], min<i32>(TOTAL_CHARS - location, TOTAL_CHARS)}, 1, 0, 1)
         location -= 1
-        if location < -TOTAL_CHARS + 1
+        if location < -TOTAL_CHARS
             location = TOTAL_CHARS - 1
         delay_ms(200)
