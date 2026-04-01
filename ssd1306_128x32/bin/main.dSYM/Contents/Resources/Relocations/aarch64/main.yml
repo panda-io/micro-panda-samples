@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/sang/Dev/panda-io/micro-panda-samples/ssd1306_128x32/bin/main'
-relocations:     []
-...

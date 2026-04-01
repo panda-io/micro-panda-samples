@@ -8,6 +8,9 @@ import drivers.ssd1306_128x32::*
 const MESSAGE: u8[] = "Hello, world!             "
 const TOTAL_CHARS: i32 = 13
 
+// Strip buffer: 128×32 Mono = 512 bytes (row-major, 16 bytes/row)
+var _strip_buf: u8[512]
+
 fun main()
     val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
     val dev: i32 = i2c_open(bus, OLED_ADDR)
@@ -18,6 +21,7 @@ fun main()
     conn.reset_pin      = -1
     conn.back_light_pin = -1
     display_attach_gfx(gfx_driver())
+    gfx_set_strip({&_strip_buf[0], 512}, PixelFormat.Mono)
     gfx_init()
 
     gfx_clear(0)

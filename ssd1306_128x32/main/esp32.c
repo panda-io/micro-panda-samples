@@ -5,13 +5,17 @@
 typedef struct GfxDriver GfxDriver;
 typedef struct DisplayConn DisplayConn;
 typedef struct DisplayInfo DisplayInfo;
+typedef struct Node Node;
+typedef struct Canvas Canvas;
+typedef struct Palette Palette;
 
 typedef void (*__Fn_void_int32_t_int32_t_int32_t)(int32_t, int32_t, int32_t);
 typedef void (*__Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t)(int32_t, int32_t, int32_t, int32_t, int32_t);
-typedef void (*__Fn_void)(void);
+typedef void (*__Fn_void_int32_t_int32_t_int32_t_int32_t_Slice_uint8_t)(int32_t, int32_t, int32_t, int32_t, __Slice_uint8_t);
 typedef void (*__Fn_void_void)(void);
 
 typedef struct { uint8_t* ptr; size_t size; } __Slice_uint8_t;
+typedef struct { uint16_t* ptr; size_t size; } __Slice_uint16_t;
 
 #define PWM_MAX_CHANNELS 8
 #define I2C_MAX_BUSES 2
@@ -396,39 +400,38 @@ static inline void    __mp_task_notify(void* handle) { xTaskNotify((TaskHandle_t
 static inline int32_t __mp_task_wait(void)           { return (int32_t)ulTaskNotifyTake(pdTRUE, portMAX_DELAY); }
 #include <string.h>
 
-// 128×32 mono framebuffer: byte[0] = 0x40 (I2C data control), byte[1..512] = pixels
-// Page p, column c -> buf[p*128 + c + 1]; bit (y & 7) within byte, LSB = top row.
-static uint8_t __mp_ssd1306_32_fb[513];
+// 128×32 page buffer: byte[0] = 0x40 (I2C data control), byte[1..512] = page-major pixels.
+// Page p, column c -> page[p*128 + c + 1]; bit (y & 7) within byte, LSB = top row.
+static uint8_t __mp_ssd1306_32_page[513];
 
-static inline void __mp_ssd1306_32_clear(void) {
-    memset(__mp_ssd1306_32_fb + 1, 0, 512);
+// Convert a linear Mono strip (row-major, MSB-left) into the page buffer and send.
+// dx,dy: destination offset in the 128×32 display.
+// w,h:   strip dimensions.
+// buf:   source slice in Mono format (stride = (w+7)/8 bytes per row).
+static void __mp_ssd1306_32_blit(int32_t dx, int32_t dy, int32_t w, int32_t h,
+                                  __Slice_uint8_t buf) {
+    int stride = (w + 7) / 8;
+    for (int ry = 0; ry < h; ry++) {
+        int abs_y = dy + ry;
+        if ((uint32_t)abs_y >= 32u) continue;
+        int page = abs_y >> 3;
+        int bit  = abs_y & 7;
+        const uint8_t *src_row = buf.data + ry * stride;
+        for (int rx = 0; rx < w; rx++) {
+            int abs_x = dx + rx;
+            if ((uint32_t)abs_x >= 128u) continue;
+            int pixel = (src_row[rx >> 3] >> (7 - (rx & 7))) & 1;
+            uint8_t *p = __mp_ssd1306_32_page + 1 + page * 128 + abs_x;
+            if (pixel) *p |= (uint8_t)(1u << bit);
+            else       *p &= ~(uint8_t)(1u << bit);
+        }
+    }
 }
 
-static inline void __mp_ssd1306_32_set_pixel(int32_t x, int32_t y, int32_t on) {
-    if ((uint32_t)x >= 128u || (uint32_t)y >= 32u) return;
-    uint8_t *p = __mp_ssd1306_32_fb + 1 + (y >> 3) * 128 + x;
-    uint8_t  m = (uint8_t)(1u << (y & 7));
-    if (on) *p |= m; else *p &= ~m;
-}
-
-static inline void __mp_ssd1306_32_fill_rect(int32_t x, int32_t y,
-                                              int32_t w, int32_t h, int32_t on) {
-    for (int row = y; row < y + h; row++)
-        for (int col = x; col < x + w; col++)
-            __mp_ssd1306_32_set_pixel(col, row, on);
-}
-
-static inline __Slice_uint8_t __mp_ssd1306_32_fb_slice(void) {
-    return (__Slice_uint8_t){ __mp_ssd1306_32_fb, 513 };
+static inline __Slice_uint8_t __mp_ssd1306_32_page_slice(void) {
+    return (__Slice_uint8_t){ __mp_ssd1306_32_page, 513 };
 }
 #include "driver/gpio.h"
-
-typedef enum {
-  GfxRotation_R0 = 0,
-  GfxRotation_R90 = 1,
-  GfxRotation_R180 = 2,
-  GfxRotation_R270 = 3,
-} GfxRotation;
 
 typedef enum {
   DisplayInterface_I2C = 0,
@@ -439,6 +442,37 @@ typedef enum {
   DisplayColor_MONO = 0,
   DisplayColor_RGB565 = 1,
 } DisplayColor;
+
+typedef enum {
+  Rotation_R0 = 0,
+  Rotation_R90 = 1,
+  Rotation_R180 = 2,
+  Rotation_R270 = 3,
+} Rotation;
+
+typedef enum {
+  PixelFormat_Mono = 0,
+  PixelFormat_Index1 = 1,
+  PixelFormat_Index2 = 2,
+  PixelFormat_Index4 = 3,
+  PixelFormat_Index8 = 4,
+  PixelFormat_RGB565 = 5,
+} PixelFormat;
+
+typedef enum {
+  Node_Canvas,
+} Node_Tag;
+
+typedef struct {
+  Canvas canvas;
+} Node_Canvas_Data;
+
+struct Node {
+  Node_Tag tag;
+  union {
+    Node_Canvas_Data Canvas;
+  } data;
+};
 
 typedef enum {
   GpioMode_INPUT = 1,
@@ -455,9 +489,7 @@ typedef enum {
 struct GfxDriver {
   int32_t width;
   int32_t height;
-  __Fn_void_int32_t_int32_t_int32_t set_pixel;
-  __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t fill_rect;
-  __Fn_void flush;
+  __Fn_void_int32_t_int32_t_int32_t_int32_t_Slice_uint8_t flush;
 };
 
 struct DisplayConn {
@@ -474,6 +506,21 @@ struct DisplayInfo {
   DisplayColor color;
 };
 
+struct Canvas {
+  __Slice_uint8_t buf;
+  int32_t x;
+  int32_t y;
+  int32_t width;
+  int32_t height;
+  PixelFormat format;
+  Palette* palette;
+  __Fn_void_int32_t_int32_t_int32_t _set_pixel_fn;
+};
+
+struct Palette {
+  __Slice_uint16_t colors;
+};
+
 void main__main(void);
 int32_t i2c__i2c_init(int32_t bus, int32_t sda, int32_t scl, int32_t freq_hz);
 int32_t i2c__i2c_open(int32_t bus, int32_t addr);
@@ -481,8 +528,11 @@ void i2c__i2c_close(int32_t dev);
 int32_t i2c__i2c_write(int32_t dev, __Slice_uint8_t data, int32_t len);
 int32_t i2c__i2c_read(int32_t dev, __Slice_uint8_t buf, int32_t len);
 int32_t i2c__i2c_write_read(int32_t dev, __Slice_uint8_t tx, int32_t tx_len, __Slice_uint8_t rx, int32_t rx_len);
-static void gfx___flush_noop(void);
 GfxDriver* gfx__gfx_driver(void);
+static void gfx___strip_pixel_mono(int32_t px, int32_t py, int32_t color);
+static void gfx___strip_fill_mono(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color);
+static void gfx___strip_pixel_rgb565(int32_t px, int32_t py, int32_t color);
+static void gfx___strip_fill_rgb565(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color);
 static void gfx___pixel_r0(int32_t x, int32_t y, int32_t color);
 static void gfx___pixel_r90(int32_t x, int32_t y, int32_t color);
 static void gfx___pixel_r180(int32_t x, int32_t y, int32_t color);
@@ -491,7 +541,8 @@ static void gfx___fill_r0(int32_t x, int32_t y, int32_t w, int32_t h, int32_t co
 static void gfx___fill_r90(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
 static void gfx___fill_r180(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
 static void gfx___fill_r270(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void gfx__gfx_set_rotation(GfxRotation r);
+void gfx__gfx_set_rotation(Rotation r);
+void gfx__gfx_set_strip(__Slice_uint8_t buf, PixelFormat fmt);
 void gfx__gfx_init(void);
 int32_t gfx__gfx_width(void);
 int32_t gfx__gfx_height(void);
@@ -513,6 +564,7 @@ void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_
 static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
 void gfx__gfx_char(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
 int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int32_t bg, int32_t scale);
+void gfx__gfx_render(Node* node, int32_t bias_x, int32_t bias_y);
 static inline int32_t math__floor_fixed(int32_t v);
 static inline int32_t math__ceil_fixed(int32_t v);
 static inline int32_t math__round_fixed(int32_t v);
@@ -521,23 +573,55 @@ DisplayInfo* display__display_info(void);
 static int32_t drivers__ssd1306_128x32___cmd1(int32_t dev, int32_t c);
 static int32_t drivers__ssd1306_128x32___cmd2(int32_t dev, int32_t c, int32_t v);
 static void drivers__ssd1306_128x32___hw_init(int32_t dev);
-static void drivers__ssd1306_128x32___flush(int32_t dev);
-static void drivers__ssd1306_128x32___gfx_set_pixel(int32_t x, int32_t y, int32_t color);
-static void drivers__ssd1306_128x32___gfx_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-static void drivers__ssd1306_128x32___gfx_flush(void);
+static void drivers__ssd1306_128x32___send_page(int32_t dev);
+static void drivers__ssd1306_128x32___gfx_flush(int32_t x, int32_t y, int32_t w, int32_t h, __Slice_uint8_t buf);
 void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver);
 void gpio__gpio_mode(int32_t pin, GpioMode mode);
 static inline void gpio__gpio_write(int32_t pin, GpioLevel value);
 static inline GpioLevel gpio__gpio_read(int32_t pin);
+void Canvas_set_format(Canvas* this, PixelFormat fmt);
+void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color);
+void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t color);
+void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t h, int32_t color);
+void Canvas_draw_line(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
+void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
+void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
+void Canvas_clear(Canvas* this, int32_t color);
+void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color);
+void Canvas_fill_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color);
+void Canvas_draw_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
+void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
+void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
+void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
+static void Canvas__set_pixel(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
+static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color);
+static void Canvas__line_raw(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
+static void Canvas__set_pixel_rgb565(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__set_pixel_mono(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__set_pixel_index1(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__set_pixel_index2(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__set_pixel_index8(Canvas* this, int32_t x, int32_t y, int32_t color);
+static inline int32_t Canvas__abs(Canvas* this, int32_t v);
+static inline int32_t Canvas__sign(Canvas* this, int32_t v);
+static inline int32_t Canvas__isqrt(Canvas* this, int32_t n);
+void Palette_set(Palette* this, int32_t index, uint16_t rgb565);
+uint16_t Palette_get(Palette* this, int32_t index);
 static inline int32_t math__min_int32_t(int32_t a, int32_t b);
 
 const __Slice_uint8_t main__MESSAGE = (__Slice_uint8_t){(uint8_t*)"Hello, world!             ", sizeof("Hello, world!             ") - 1};
 const int32_t main__TOTAL_CHARS = 13;
+static uint8_t main___strip_buf[512];
 static GfxDriver gfx___driver;
+static __Slice_uint8_t gfx___strip;
+static PixelFormat gfx___format;
 static int32_t gfx___view_w;
 static int32_t gfx___view_h;
 static __Fn_void_int32_t_int32_t_int32_t gfx___pixel_fn;
 static __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t gfx___fill_fn;
+static __Fn_void_int32_t_int32_t_int32_t gfx___phys_pixel_fn;
+static __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t gfx___phys_fill_fn;
 static DisplayConn display___conn;
 static DisplayInfo display___info;
 
@@ -550,6 +634,7 @@ void main__main(void) {
   (conn->reset_pin = (-1));
   (conn->back_light_pin = (-1));
   drivers__ssd1306_128x32__display_attach_gfx(gfx__gfx_driver());
+  gfx__gfx_set_strip((__Slice_uint8_t){(&main___strip_buf[0]), 512}, PixelFormat_Mono);
   gfx__gfx_init();
   gfx__gfx_clear(0);
   gfx__gfx_rect(0, 0, 128, 32, 1);
@@ -597,66 +682,102 @@ int32_t i2c__i2c_write_read(int32_t dev, __Slice_uint8_t tx, int32_t tx_len, __S
   return __mp_i2c_write_read(dev, tx, tx_len, rx, rx_len);
 }
 
-static void gfx___flush_noop(void) {
-  return;
-}
-
 GfxDriver* gfx__gfx_driver(void) {
   return (&gfx___driver);
 }
 
+static void gfx___strip_pixel_mono(int32_t px, int32_t py, int32_t color) {
+  int32_t stride = ((gfx___driver.width + 7) / 8);
+  int32_t idx = ((py * stride) + (px / 8));
+  if ((color != 0)) {
+    (gfx___strip.ptr[idx] = (gfx___strip.ptr[idx] | ((uint8_t)((0x80 >> (px & 7))))));
+  } else {
+    (gfx___strip.ptr[idx] = (gfx___strip.ptr[idx] & ((uint8_t)((~(0x80 >> (px & 7)))))));
+  }
+}
+
+static void gfx___strip_fill_mono(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color) {
+  int32_t iy = py;
+  while ((iy < (py + h))) {
+    int32_t ix = px;
+    while ((ix < (px + w))) {
+      gfx___strip_pixel_mono(ix, iy, color);
+      (ix += 1);
+    }
+    (iy += 1);
+  }
+}
+
+static void gfx___strip_pixel_rgb565(int32_t px, int32_t py, int32_t color) {
+  int32_t idx = (((py * gfx___driver.width) + px) * 2);
+  (gfx___strip.ptr[idx] = ((uint8_t)((color >> 8))));
+  (gfx___strip.ptr[(idx + 1)] = ((uint8_t)(color)));
+}
+
+static void gfx___strip_fill_rgb565(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color) {
+  int32_t iy = py;
+  while ((iy < (py + h))) {
+    int32_t ix = px;
+    while ((ix < (px + w))) {
+      gfx___strip_pixel_rgb565(ix, iy, color);
+      (ix += 1);
+    }
+    (iy += 1);
+  }
+}
+
 static void gfx___pixel_r0(int32_t x, int32_t y, int32_t color) {
-  (&gfx___driver)->set_pixel(x, y, color);
+  gfx___phys_pixel_fn(x, y, color);
 }
 
 static void gfx___pixel_r90(int32_t x, int32_t y, int32_t color) {
-  (&gfx___driver)->set_pixel(((gfx___driver.width - 1) - y), x, color);
+  gfx___phys_pixel_fn(((gfx___driver.width - 1) - y), x, color);
 }
 
 static void gfx___pixel_r180(int32_t x, int32_t y, int32_t color) {
-  (&gfx___driver)->set_pixel(((gfx___driver.width - 1) - x), ((gfx___driver.height - 1) - y), color);
+  gfx___phys_pixel_fn(((gfx___driver.width - 1) - x), ((gfx___driver.height - 1) - y), color);
 }
 
 static void gfx___pixel_r270(int32_t x, int32_t y, int32_t color) {
-  (&gfx___driver)->set_pixel(y, ((gfx___driver.height - 1) - x), color);
+  gfx___phys_pixel_fn(y, ((gfx___driver.height - 1) - x), color);
 }
 
 static void gfx___fill_r0(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  (&gfx___driver)->fill_rect(x, y, w, h, color);
+  gfx___phys_fill_fn(x, y, w, h, color);
 }
 
 static void gfx___fill_r90(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  (&gfx___driver)->fill_rect(((gfx___driver.width - y) - h), x, h, w, color);
+  gfx___phys_fill_fn(((gfx___driver.width - y) - h), x, h, w, color);
 }
 
 static void gfx___fill_r180(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  (&gfx___driver)->fill_rect(((gfx___driver.width - x) - w), ((gfx___driver.height - y) - h), w, h, color);
+  gfx___phys_fill_fn(((gfx___driver.width - x) - w), ((gfx___driver.height - y) - h), w, h, color);
 }
 
 static void gfx___fill_r270(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  (&gfx___driver)->fill_rect(y, ((gfx___driver.height - x) - w), h, w, color);
+  gfx___phys_fill_fn(y, ((gfx___driver.height - x) - w), h, w, color);
 }
 
-void gfx__gfx_set_rotation(GfxRotation r) {
-  if ((r == GfxRotation_R0)) {
+void gfx__gfx_set_rotation(Rotation r) {
+  if ((r == Rotation_R0)) {
     (gfx___pixel_fn = gfx___pixel_r0);
     (gfx___fill_fn = gfx___fill_r0);
     (gfx___view_w = gfx___driver.width);
     (gfx___view_h = gfx___driver.height);
   }
-  if ((r == GfxRotation_R90)) {
+  if ((r == Rotation_R90)) {
     (gfx___pixel_fn = gfx___pixel_r90);
     (gfx___fill_fn = gfx___fill_r90);
     (gfx___view_w = gfx___driver.height);
     (gfx___view_h = gfx___driver.width);
   }
-  if ((r == GfxRotation_R180)) {
+  if ((r == Rotation_R180)) {
     (gfx___pixel_fn = gfx___pixel_r180);
     (gfx___fill_fn = gfx___fill_r180);
     (gfx___view_w = gfx___driver.width);
     (gfx___view_h = gfx___driver.height);
   }
-  if ((r == GfxRotation_R270)) {
+  if ((r == Rotation_R270)) {
     (gfx___pixel_fn = gfx___pixel_r270);
     (gfx___fill_fn = gfx___fill_r270);
     (gfx___view_w = gfx___driver.height);
@@ -664,11 +785,21 @@ void gfx__gfx_set_rotation(GfxRotation r) {
   }
 }
 
+void gfx__gfx_set_strip(__Slice_uint8_t buf, PixelFormat fmt) {
+  (gfx___strip = buf);
+  (gfx___format = fmt);
+}
+
 void gfx__gfx_init(void) {
-  if ((gfx___driver.flush == NULL)) {
-    (gfx___driver.flush = gfx___flush_noop);
+  if ((gfx___format == PixelFormat_Mono)) {
+    (gfx___phys_pixel_fn = gfx___strip_pixel_mono);
+    (gfx___phys_fill_fn = gfx___strip_fill_mono);
   }
-  gfx__gfx_set_rotation(GfxRotation_R0);
+  if ((gfx___format == PixelFormat_RGB565)) {
+    (gfx___phys_pixel_fn = gfx___strip_pixel_rgb565);
+    (gfx___phys_fill_fn = gfx___strip_fill_rgb565);
+  }
+  gfx__gfx_set_rotation(Rotation_R0);
 }
 
 int32_t gfx__gfx_width(void) {
@@ -684,7 +815,7 @@ void gfx__gfx_pixel(int32_t x, int32_t y, int32_t color) {
     return;
   }
   gfx___pixel_fn(x, y, color);
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_hline(int32_t x, int32_t y, int32_t w, int32_t color) {
@@ -732,7 +863,7 @@ void gfx__gfx_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color
       gfx___pixel_fn(x0, y0, color);
     }
     if (((x0 == x1) && (y0 == y1))) {
-      (&gfx___driver)->flush();
+      (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
       return;
     }
     int32_t e2 = (err * 2);
@@ -752,17 +883,17 @@ void gfx__gfx_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
   gfx___fill_fn(x, ((y + h) - 1), w, 1, color);
   gfx___fill_fn(x, (y + 1), 1, (h - 2), color);
   gfx___fill_fn(((x + w) - 1), (y + 1), 1, (h - 2), color);
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
   gfx___fill_fn(x, y, w, h, color);
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_clear(int32_t color) {
-  (&gfx___driver)->fill_rect(0, 0, gfx___driver.width, gfx___driver.height, color);
-  (&gfx___driver)->flush();
+  gfx___fill_fn(0, 0, gfx___view_w, gfx___view_h, color);
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 static void gfx___circle_8(int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color) {
@@ -791,7 +922,7 @@ void gfx__gfx_circle(int32_t cx, int32_t cy, int32_t r, int32_t color) {
     (x += 1);
     gfx___circle_8(cx, cy, x, y, color);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_fill_circle(int32_t cx, int32_t cy, int32_t r, int32_t color) {
@@ -801,7 +932,7 @@ void gfx__gfx_fill_circle(int32_t cx, int32_t cy, int32_t r, int32_t color) {
     gfx___fill_fn((cx - dx), (cy + dy), ((dx * 2) + 1), 1, color);
     (dy += 1);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 static void gfx___line_raw(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
@@ -833,7 +964,7 @@ void gfx__gfx_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x
   gfx___line_raw(x0, y0, x1, y1, color);
   gfx___line_raw(x1, y1, x2, y2, color);
   gfx___line_raw(x2, y2, x0, y0, color);
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_fill_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
@@ -885,7 +1016,7 @@ void gfx__gfx_fill_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int3
     gfx___fill_fn(xa, y, ((xb - xa) + 1), 1, color);
     (y += 1);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
@@ -913,7 +1044,7 @@ void gfx__gfx_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, 
     }
     (px += 1);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
@@ -934,7 +1065,7 @@ void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_
     }
     (px += 1);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale) {
@@ -958,7 +1089,7 @@ static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32
 
 void gfx__gfx_char(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale) {
   gfx___char_raw(x, y, c, color, bg, scale);
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
 }
 
 int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int32_t bg, int32_t scale) {
@@ -969,8 +1100,18 @@ int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int
     (cx += (9 * scale));
     (i += 1);
   }
-  (&gfx___driver)->flush();
+  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
   return cx;
+}
+
+void gfx__gfx_render(Node* node, int32_t bias_x, int32_t bias_y) {
+  switch ((node)->tag) {
+    case Node_Canvas: {
+      Canvas c = (node)->data.Canvas.canvas;
+      (&gfx___driver)->flush((c.x + bias_x), (c.y + bias_y), c.width, c.height, c.buf);
+      break;
+    }
+  }
 }
 
 static inline int32_t math__floor_fixed(int32_t v) {
@@ -1031,7 +1172,7 @@ static void drivers__ssd1306_128x32___hw_init(int32_t dev) {
   drivers__ssd1306_128x32___cmd1(dev, 0xAF);
 }
 
-static void drivers__ssd1306_128x32___flush(int32_t dev) {
+static void drivers__ssd1306_128x32___send_page(int32_t dev) {
   uint8_t col[4];
   (col[0] = 0x00);
   (col[1] = 0x21);
@@ -1044,20 +1185,13 @@ static void drivers__ssd1306_128x32___flush(int32_t dev) {
   (page[2] = 0x00);
   (page[3] = 0x03);
   i2c__i2c_write(dev, (__Slice_uint8_t){page, 4}, 4);
-  __Slice_uint8_t fb = __mp_ssd1306_32_fb_slice();
-  i2c__i2c_write(dev, fb, 513);
+  __Slice_uint8_t pg = __mp_ssd1306_32_page_slice();
+  i2c__i2c_write(dev, pg, 513);
 }
 
-static void drivers__ssd1306_128x32___gfx_set_pixel(int32_t x, int32_t y, int32_t color) {
-  __mp_ssd1306_32_set_pixel(x, y, color);
-}
-
-static void drivers__ssd1306_128x32___gfx_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  __mp_ssd1306_32_fill_rect(x, y, w, h, color);
-}
-
-static void drivers__ssd1306_128x32___gfx_flush(void) {
-  drivers__ssd1306_128x32___flush(display___conn.device);
+static void drivers__ssd1306_128x32___gfx_flush(int32_t x, int32_t y, int32_t w, int32_t h, __Slice_uint8_t buf) {
+  __mp_ssd1306_32_blit(x, y, w, h, buf);
+  drivers__ssd1306_128x32___send_page(display___conn.device);
 }
 
 void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver) {
@@ -1071,13 +1205,10 @@ void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver) {
     gpio__gpio_write(display___conn.reset_pin, GpioLevel_HIGH);
   }
   drivers__ssd1306_128x32___hw_init(display___conn.device);
-  __Slice_uint8_t fb = __mp_ssd1306_32_fb_slice();
-  (fb.ptr[0] = 0x40);
-  __mp_ssd1306_32_clear();
+  __Slice_uint8_t pg = __mp_ssd1306_32_page_slice();
+  (pg.ptr[0] = 0x40);
   (driver->width = 128);
   (driver->height = 32);
-  (driver->set_pixel = drivers__ssd1306_128x32___gfx_set_pixel);
-  (driver->fill_rect = drivers__ssd1306_128x32___gfx_fill_rect);
   (driver->flush = drivers__ssd1306_128x32___gfx_flush);
 }
 
@@ -1100,6 +1231,358 @@ static inline void gpio__gpio_write(int32_t pin, GpioLevel value) {
 
 static inline GpioLevel gpio__gpio_read(int32_t pin) {
   return ((GpioLevel)(gpio_get_level(pin)));
+}
+
+void Canvas_set_format(Canvas* this, PixelFormat fmt) {
+  (this->format = fmt);
+  if ((fmt == PixelFormat_RGB565)) {
+    (this->_set_pixel_fn = _set_pixel_rgb565);
+  }
+  if ((fmt == PixelFormat_Mono)) {
+    (this->_set_pixel_fn = _set_pixel_mono);
+  }
+  if ((fmt == PixelFormat_Index1)) {
+    (this->_set_pixel_fn = _set_pixel_index1);
+  }
+  if ((fmt == PixelFormat_Index2)) {
+    (this->_set_pixel_fn = _set_pixel_index2);
+  }
+  if ((fmt == PixelFormat_Index4)) {
+    (this->_set_pixel_fn = _set_pixel_index4);
+  }
+  if ((fmt == PixelFormat_Index8)) {
+    (this->_set_pixel_fn = _set_pixel_index8);
+  }
+}
+
+void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  if (((((x < 0) || (x >= this->width)) || (y < 0)) || (y >= this->height))) {
+    return;
+  }
+  Canvas__set_pixel(this, x, y, color);
+}
+
+void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t color) {
+  if ((((w <= 0) || (y < 0)) || (y >= this->height))) {
+    return;
+  }
+  if ((x < 0)) {
+    (w += x);
+    (x = 0);
+  }
+  if (((x + w) > this->width)) {
+    (w = (this->width - x));
+  }
+  if ((w <= 0)) {
+    return;
+  }
+  Canvas__fill_rect(this, x, y, w, 1, color);
+}
+
+void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t h, int32_t color) {
+  if ((((h <= 0) || (x < 0)) || (x >= this->width))) {
+    return;
+  }
+  if ((y < 0)) {
+    (h += y);
+    (y = 0);
+  }
+  if (((y + h) > this->height)) {
+    (h = (this->height - y));
+  }
+  if ((h <= 0)) {
+    return;
+  }
+  Canvas__fill_rect(this, x, y, 1, h, color);
+}
+
+void Canvas_draw_line(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
+  Canvas__line_raw(this, x0, y0, x1, y1, color);
+}
+
+void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
+  Canvas__fill_rect(this, x, y, w, 1, color);
+  Canvas__fill_rect(this, x, ((y + h) - 1), w, 1, color);
+  Canvas__fill_rect(this, x, (y + 1), 1, (h - 2), color);
+  Canvas__fill_rect(this, ((x + w) - 1), (y + 1), 1, (h - 2), color);
+}
+
+void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
+  Canvas__fill_rect(this, x, y, w, h, color);
+}
+
+void Canvas_clear(Canvas* this, int32_t color) {
+  Canvas__fill_rect(this, 0, 0, this->width, this->height, color);
+}
+
+void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color) {
+  int32_t x = 0;
+  int32_t y = r;
+  int32_t d = (1 - r);
+  Canvas__circle_8(this, cx, cy, x, y, color);
+  while ((x < y)) {
+    if ((d < 0)) {
+      (d += ((2 * x) + 3));
+    } else {
+      (d += ((2 * (x - y)) + 5));
+      (y -= 1);
+    }
+    (x += 1);
+    Canvas__circle_8(this, cx, cy, x, y, color);
+  }
+}
+
+void Canvas_fill_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color) {
+  int32_t dy = (-r);
+  while ((dy <= r)) {
+    int32_t dx = __mp_gfx_isqrt(((r * r) - (dy * dy)));
+    Canvas__fill_rect(this, (cx - dx), (cy + dy), ((dx * 2) + 1), 1, color);
+    (dy += 1);
+  }
+}
+
+void Canvas_draw_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
+  Canvas__line_raw(this, x0, y0, x1, y1, color);
+  Canvas__line_raw(this, x1, y1, x2, y2, color);
+  Canvas__line_raw(this, x2, y2, x0, y0, color);
+}
+
+void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
+  int32_t tx = 0;
+  int32_t ty = 0;
+  if ((y1 < y0)) {
+    (tx = x0);
+    (ty = y0);
+    (x0 = x1);
+    (y0 = y1);
+    (x1 = tx);
+    (y1 = ty);
+  }
+  if ((y2 < y0)) {
+    (tx = x0);
+    (ty = y0);
+    (x0 = x2);
+    (y0 = y2);
+    (x2 = tx);
+    (y2 = ty);
+  }
+  if ((y2 < y1)) {
+    (tx = x1);
+    (ty = y1);
+    (x1 = x2);
+    (y1 = y2);
+    (x2 = tx);
+    (y2 = ty);
+  }
+  int32_t y = y0;
+  while ((y <= y2)) {
+    int32_t xa = 0;
+    int32_t xb = 0;
+    if (((y <= y1) && (y1 != y0))) {
+      (xa = (x0 + (((y - y0) * (x1 - x0)) / (y1 - y0))));
+    } else {
+      (xa = x1);
+    }
+    if ((y2 != y0)) {
+      (xb = (x0 + (((y - y0) * (x2 - x0)) / (y2 - y0))));
+    } else {
+      (xb = x0);
+    }
+    if ((xa > xb)) {
+      (tx = xa);
+      (xa = xb);
+      (xb = tx);
+    }
+    Canvas__fill_rect(this, xa, y, ((xb - xa) + 1), 1, color);
+    (y += 1);
+  }
+}
+
+void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
+  Canvas__fill_rect(this, (x + r), y, (w - (2 * r)), 1, color);
+  Canvas__fill_rect(this, (x + r), ((y + h) - 1), (w - (2 * r)), 1, color);
+  Canvas__fill_rect(this, x, (y + r), 1, (h - (2 * r)), color);
+  Canvas__fill_rect(this, ((x + w) - 1), (y + r), 1, (h - (2 * r)), color);
+  int32_t px = 0;
+  int32_t py = r;
+  int32_t d = (1 - r);
+  while ((px <= py)) {
+    Canvas__set_pixel(this, ((((x + w) - 1) - r) + py), ((y + r) - px), color);
+    Canvas__set_pixel(this, ((x + r) - py), ((y + r) - px), color);
+    Canvas__set_pixel(this, ((((x + w) - 1) - r) + py), ((((y + h) - 1) - r) + px), color);
+    Canvas__set_pixel(this, ((x + r) - py), ((((y + h) - 1) - r) + px), color);
+    Canvas__set_pixel(this, ((((x + w) - 1) - r) + px), ((y + r) - py), color);
+    Canvas__set_pixel(this, ((x + r) - px), ((y + r) - py), color);
+    Canvas__set_pixel(this, ((((x + w) - 1) - r) + px), ((((y + h) - 1) - r) + py), color);
+    Canvas__set_pixel(this, ((x + r) - px), ((((y + h) - 1) - r) + py), color);
+    if ((d < 0)) {
+      (d += ((2 * px) + 3));
+    } else {
+      (d += ((2 * (px - py)) + 5));
+      (py -= 1);
+    }
+    (px += 1);
+  }
+}
+
+void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
+  Canvas__fill_rect(this, (x + r), y, (w - (2 * r)), h, color);
+  int32_t px = 0;
+  int32_t py = r;
+  int32_t d = (1 - r);
+  while ((px <= py)) {
+    Canvas__fill_rect(this, (((((x + w) - 1) - r) - py) + 1), ((y + r) - px), ((py * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + w) - 1) - r) - py) + 1), ((((y + h) - 1) - r) + px), ((py * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + w) - 1) - r) - px) + 1), ((y + r) - py), ((px * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + w) - 1) - r) - px) + 1), ((((y + h) - 1) - r) + py), ((px * 2) - 1), 1, color);
+    if ((d < 0)) {
+      (d += ((2 * px) + 3));
+    } else {
+      (d += ((2 * (px - py)) + 5));
+      (py -= 1);
+    }
+    (px += 1);
+  }
+}
+
+static void Canvas__set_pixel(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  this->_set_pixel_fn(x, y, color);
+}
+
+static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
+  int32_t iy = y;
+  while ((iy < (y + h))) {
+    int32_t ix = x;
+    while ((ix < (x + w))) {
+      Canvas__set_pixel(this, ix, iy, color);
+      (ix += 1);
+    }
+    (iy += 1);
+  }
+}
+
+static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color) {
+  Canvas_draw_pixel(this, (cx + x), (cy + y), color);
+  Canvas_draw_pixel(this, (cx - x), (cy + y), color);
+  Canvas_draw_pixel(this, (cx + x), (cy - y), color);
+  Canvas_draw_pixel(this, (cx - x), (cy - y), color);
+  Canvas_draw_pixel(this, (cx + y), (cy + x), color);
+  Canvas_draw_pixel(this, (cx - y), (cy + x), color);
+  Canvas_draw_pixel(this, (cx + y), (cy - x), color);
+  Canvas_draw_pixel(this, (cx - y), (cy - x), color);
+}
+
+static void Canvas__line_raw(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
+  int32_t dx = __mp_gfx_abs((x1 - x0));
+  int32_t dy = __mp_gfx_abs((y1 - y0));
+  int32_t sx = __mp_gfx_sign((x1 - x0));
+  int32_t sy = __mp_gfx_sign((y1 - y0));
+  int32_t err = (dx - dy);
+  int32_t cx = x0;
+  int32_t cy = y0;
+  while (true) {
+    if (((((cx >= 0) && (cx < this->width)) && (cy >= 0)) && (cy < this->height))) {
+      Canvas__set_pixel(this, cx, cy, color);
+    }
+    if (((cx == x1) && (cy == y1))) {
+      return;
+    }
+    int32_t e2 = (err * 2);
+    if ((e2 > (-dy))) {
+      (err -= dy);
+      (cx += sx);
+    }
+    if ((e2 < dx)) {
+      (err += dx);
+      (cy += sy);
+    }
+  }
+}
+
+static void Canvas__set_pixel_rgb565(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  int32_t idx = (((y * this->width) + x) * 2);
+  (this->buf.ptr[idx] = ((uint8_t)((color >> 8))));
+  (this->buf.ptr[(idx + 1)] = ((uint8_t)(color)));
+}
+
+static void Canvas__set_pixel_mono(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  int32_t idx = ((y * ((this->width + 7) / 8)) + (x / 8));
+  if ((color != 0)) {
+    (this->buf.ptr[idx] = (this->buf.ptr[idx] | ((uint8_t)((0x80 >> (x & 7))))));
+  } else {
+    (this->buf.ptr[idx] = (this->buf.ptr[idx] & ((uint8_t)((~(0x80 >> (x & 7)))))));
+  }
+}
+
+static void Canvas__set_pixel_index1(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  int32_t idx = ((y * ((this->width + 7) / 8)) + (x / 8));
+  if (((color & 1) != 0)) {
+    (this->buf.ptr[idx] = (this->buf.ptr[idx] | ((uint8_t)((0x80 >> (x & 7))))));
+  } else {
+    (this->buf.ptr[idx] = (this->buf.ptr[idx] & ((uint8_t)((~(0x80 >> (x & 7)))))));
+  }
+}
+
+static void Canvas__set_pixel_index2(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  int32_t idx = (((y * this->width) + x) / 4);
+  int32_t shift = ((3 - (x & 3)) * 2);
+  (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)((~(0x03 << shift))))) | ((uint8_t)(((color & 0x03) << shift)))));
+}
+
+static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  int32_t idx = (((y * this->width) + x) / 2);
+  if (((x & 1) == 0)) {
+    (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)(0x0F))) | ((uint8_t)((color << 4)))));
+  } else {
+    (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)(0xF0))) | ((uint8_t)((color & 0x0F)))));
+  }
+}
+
+static void Canvas__set_pixel_index8(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  (this->buf.ptr[((y * this->width) + x)] = ((uint8_t)(color)));
+}
+
+static inline int32_t Canvas__abs(Canvas* this, int32_t v) {
+  if ((v < 0)) {
+    return (-v);
+  }
+  return v;
+}
+
+static inline int32_t Canvas__sign(Canvas* this, int32_t v) {
+  if ((v > 0)) {
+    return 1;
+  }
+  if ((v < 0)) {
+    return (-1);
+  }
+  return 0;
+}
+
+static inline int32_t Canvas__isqrt(Canvas* this, int32_t n) {
+  if ((n <= 0)) {
+    return 0;
+  }
+  int32_t x = n;
+  int32_t y = ((x + 1) / 2);
+  while ((y < x)) {
+    (x = y);
+    (y = ((x + (n / x)) / 2));
+  }
+  return x;
+}
+
+void Palette_set(Palette* this, int32_t index, uint16_t rgb565) {
+  if (((index >= 0) && (index < ((int32_t)(this->colors.size))))) {
+    (this->colors.ptr[index] = rgb565);
+  }
+}
+
+uint16_t Palette_get(Palette* this, int32_t index) {
+  if (((index >= 0) && (index < ((int32_t)(this->colors.size))))) {
+    return this->colors.ptr[index];
+  }
+  return ((uint16_t)(0));
 }
 
 static inline int32_t math__min_int32_t(int32_t a, int32_t b) {
