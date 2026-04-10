@@ -8,7 +8,7 @@ import palette::*
 import rtos::*
 import mcu32.allocator::Allocator
 
-const HEAP_SIZE: int = 1600
+const HEAP_SIZE: int = 1024
 
 var _heap:   u8[HEAP_SIZE]
 var _strip:  u8[512]

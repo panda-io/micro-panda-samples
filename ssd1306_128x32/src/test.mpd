@@ -1,4 +1,0 @@
-import rtos::*
-
-fun test()
-    delay_ms(1000)

@@ -13,6 +13,6 @@ targets:
     type: c
     out: main/esp32.c
     config: esp32.yaml
-    flags: [ESP32]
+    flags: [ESP32, MCU32]
     gen:
       entry: app_main
