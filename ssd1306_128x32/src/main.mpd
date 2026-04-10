@@ -5,20 +5,21 @@ import display::*
 import drivers.ssd1306::*
 import node.canvas::*
 import palette::*
+import rtos::*
 import mcu32.allocator::Allocator
 
 const HEAP_SIZE: int = 1600
 
 var _heap:   u8[HEAP_SIZE]
 var _strip:  u8[512]
-var _driver: GraphicsDriver
+var _driver: Ssd1306
 var _gfx:    Graphics
 
 fun main()
     val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
     val dev: i32 = i2c_open(bus, OLED_ADDR)
 
-    val conn: &DisplayConn = display_conn()
+    var conn: DisplayConn
     conn.interface      = DisplayInterface.I2C
     conn.device         = dev
     conn.dc_pin         = -1
@@ -27,13 +28,16 @@ fun main()
 
     var alloc: Allocator
     alloc.init({&_heap[0], HEAP_SIZE})
-    attach_ssd1306_128x32(&_driver, &alloc)
+    attach_ssd1306_128x32(&_driver, &conn)
 
     var rect: Rect = { 0, 0, 128, 32 }
     val canvas: &Canvas = create_canvas(&alloc, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
     canvas.draw_rect(0, 0, 128, 32, 1)
 
-    _gfx.init(&_driver, {&_strip[0], 512}, {null, 0}, PixelFormat.Mono, 0, Rotation.R0, false)
+    _gfx.init(&_driver.driver, {&_strip[0], 512}, {null, 0}, PixelFormat.Mono, 0, Rotation.R0, false)
     _gfx.set_root(canvas.get_node())
     _gfx.render()
+
+    while true
+        delay_ms(1000)

@@ -2,20 +2,103 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef struct GfxDriver GfxDriver;
+typedef struct GraphicsDriver GraphicsDriver;
+typedef struct Graphics Graphics;
+typedef struct Point Point;
+typedef struct Rect Rect;
 typedef struct DisplayConn DisplayConn;
-typedef struct DisplayInfo DisplayInfo;
-typedef struct Node Node;
+typedef struct Ssd1306 Ssd1306;
 typedef struct Canvas Canvas;
-typedef struct Palette Palette;
+typedef struct Node Node;
+typedef struct RenderContext RenderContext;
 
+typedef enum {
+  PixelFormat_Mono = 0,
+  PixelFormat_RGB565 = 1,
+} PixelFormat;
+
+typedef enum {
+  IndexFormat_Index1 = 0,
+  IndexFormat_Index2 = 1,
+  IndexFormat_Index4 = 2,
+  IndexFormat_Index8 = 3,
+} IndexFormat;
+
+typedef enum {
+  Rotation_R0 = 0,
+  Rotation_R90 = 1,
+  Rotation_R180 = 2,
+  Rotation_R270 = 3,
+} Rotation;
+
+typedef enum {
+  DisplayInterface_I2C = 0,
+  DisplayInterface_SPI = 1,
+} DisplayInterface;
+
+typedef enum {
+  DisplayColor_MONO = 0,
+  DisplayColor_RGB565 = 1,
+} DisplayColor;
+
+typedef enum {
+  MonoColor_Off = 0,
+  MonoColor_On = 1,
+} MonoColor;
+
+typedef enum {
+  Gray4Color_Black = 0,
+  Gray4Color_DarkGray = 1,
+  Gray4Color_LightGray = 2,
+  Gray4Color_White = 3,
+} Gray4Color;
+
+typedef enum {
+  Gray16Color_Black = 0,
+  Gray16Color_White = 15,
+} Gray16Color;
+
+typedef enum {
+  UIColor_Black = 0,
+  UIColor_White = 1,
+  UIColor_Red = 2,
+  UIColor_Green = 3,
+  UIColor_Blue = 4,
+  UIColor_Yellow = 5,
+  UIColor_Cyan = 6,
+  UIColor_Magenta = 7,
+  UIColor_DarkGray = 8,
+  UIColor_LightGray = 9,
+  UIColor_DarkRed = 10,
+  UIColor_DarkGreen = 11,
+  UIColor_DarkBlue = 12,
+  UIColor_Orange = 13,
+  UIColor_Purple = 14,
+  UIColor_Teal = 15,
+} UIColor;
+
+typedef enum {
+  GpioMode_INPUT = 1,
+  GpioMode_OUTPUT = 3,
+  GpioMode_INPUT_PULLUP = 5,
+  GpioMode_INPUT_PULLDOWN = 6,
+} GpioMode;
+
+typedef enum {
+  GpioLevel_LOW = 0,
+  GpioLevel_HIGH = 1,
+} GpioLevel;
+
+typedef void (*__Fn_void_Rotation)(Rotation);
+typedef void (*__Fn_void)(void);
+typedef void (*__Fn_void_Rect_p_Slice_uint8_t)(Rect*, __Slice_uint8_t);
 typedef void (*__Fn_void_int32_t_int32_t_int32_t)(int32_t, int32_t, int32_t);
-typedef void (*__Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t)(int32_t, int32_t, int32_t, int32_t, int32_t);
-typedef void (*__Fn_void_int32_t_int32_t_int32_t_int32_t_Slice_uint8_t)(int32_t, int32_t, int32_t, int32_t, __Slice_uint8_t);
+typedef void (*__Fn_void_RenderContext_p_Rect_p_Point_p)(RenderContext*, Rect*, Point*);
 typedef void (*__Fn_void_void)(void);
+typedef void (*__Fn_void_RenderContext_p_Point_p_void_p)(RenderContext*, Point*, void*);
 
-typedef struct { uint8_t* ptr; size_t size; } __Slice_uint8_t;
-typedef struct { uint16_t* ptr; size_t size; } __Slice_uint16_t;
+typedef struct { uint8_t* ptr; int32_t size; } __Slice_uint8_t;
+typedef struct { uint16_t* ptr; int32_t size; } __Slice_uint16_t;
 
 #define PWM_MAX_CHANNELS 8
 #define I2C_MAX_BUSES 2
@@ -96,288 +179,6 @@ static inline int32_t __mp_i2c_write_read(int32_t dev,
         rx.ptr, (size_t)rx_len,
         I2C_TIMEOUT_MS);
 }
-#include <stdint.h>
-#include <stddef.h>
-
-// CP437 8x8 font — row-major, bit7 = leftmost pixel, 256 glyphs × 8 bytes.
-static const uint8_t __mp_gfx_font[256][8] = {
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 00 NUL
-    {0x7E,0x81,0xA5,0x81,0xBD,0x99,0x81,0x7E}, // 01 ☺
-    {0x7E,0xFF,0xDB,0xFF,0xC3,0xE7,0xFF,0x7E}, // 02 ☻
-    {0x6C,0xFE,0xFE,0xFE,0x7C,0x38,0x10,0x00}, // 03 ♥
-    {0x10,0x38,0x7C,0xFE,0x7C,0x38,0x10,0x00}, // 04 ♦
-    {0x38,0x7C,0x38,0xFE,0xFE,0x10,0x28,0x00}, // 05 ♣
-    {0x10,0x10,0x38,0x7C,0xFE,0x7C,0x28,0xEE}, // 06 ♠
-    {0x00,0x00,0x18,0x3C,0x3C,0x18,0x00,0x00}, // 07 •
-    {0xFF,0xFF,0xE7,0xC3,0xC3,0xE7,0xFF,0xFF}, // 08 ◘
-    {0x00,0x3C,0x66,0x42,0x42,0x66,0x3C,0x00}, // 09 ○
-    {0xFF,0xC3,0x99,0xBD,0xBD,0x99,0xC3,0xFF}, // 0A ◙
-    {0x0F,0x07,0x0F,0x7D,0xCC,0xCC,0xCC,0x78}, // 0B ♂
-    {0x3C,0x66,0x66,0x66,0x3C,0x18,0x7E,0x18}, // 0C ♀
-    {0x3F,0x33,0x3F,0x30,0x30,0x70,0xF0,0xE0}, // 0D ♪
-    {0x7F,0x63,0x7F,0x63,0x63,0x67,0xE6,0xC0}, // 0E ♫
-    {0xFF,0x5A,0x3C,0xE7,0xE7,0x3C,0x5A,0xFF}, // 0F ☼
-    {0x80,0xC0,0xE0,0xF0,0xE0,0xC0,0x80,0x00}, // 10 ►
-    {0x02,0x06,0x0E,0x1E,0x0E,0x06,0x02,0x00}, // 11 ◄
-    {0x18,0x3C,0x7E,0x18,0x18,0x7E,0x3C,0x18}, // 12 ↕
-    {0x66,0x66,0x66,0x66,0x66,0x00,0x66,0x00}, // 13 ‼
-    {0x7F,0xDB,0xDB,0x7B,0x1B,0x1B,0x1B,0x00}, // 14 ¶
-    {0x3E,0x63,0x38,0x6E,0x63,0x1C,0x6C,0x3E}, // 15 §
-    {0x00,0x00,0x00,0x7E,0x7E,0x00,0x00,0x00}, // 16 ▬
-    {0x18,0x3C,0x7E,0x18,0x7E,0x3C,0x18,0xFF}, // 17 ↨
-    {0x10,0x38,0x7C,0xFE,0x38,0x38,0x38,0x00}, // 18 ↑
-    {0x38,0x38,0x38,0xFE,0x7C,0x38,0x10,0x00}, // 19 ↓
-    {0x00,0x18,0x0C,0xFE,0x0C,0x18,0x00,0x00}, // 1A →
-    {0x00,0x30,0x60,0xFE,0x60,0x30,0x00,0x00}, // 1B ←
-    {0x00,0x00,0x60,0x60,0x60,0x7E,0x00,0x00}, // 1C └ (ctrl)
-    {0x00,0x18,0x3C,0x7E,0x18,0x18,0x18,0x00}, // 1D ↔
-    {0x3C,0x60,0xC0,0xFE,0xC0,0x60,0x3C,0x00}, // 1E ▲
-    {0x3C,0x06,0x03,0x7F,0x03,0x06,0x3C,0x00}, // 1F ▼
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 20 ' '
-    {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00}, // 21 !
-    {0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00}, // 22 "
-    {0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00}, // 23 #
-    {0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00}, // 24 $
-    {0x00,0xC6,0xCC,0x18,0x30,0x66,0xC6,0x00}, // 25 %
-    {0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00}, // 26 &
-    {0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00}, // 27 '
-    {0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00}, // 28 (
-    {0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00}, // 29 )
-    {0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00}, // 2A *
-    {0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00}, // 2B +
-    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30}, // 2C ,
-    {0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00}, // 2D -
-    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00}, // 2E .
-    {0x06,0x0C,0x18,0x30,0x60,0xC0,0x80,0x00}, // 2F /
-    {0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00}, // 30 0
-    {0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00}, // 31 1
-    {0x7C,0xC6,0x06,0x1C,0x38,0x60,0xFE,0x00}, // 32 2
-    {0x7C,0xC6,0x06,0x3C,0x06,0xC6,0x7C,0x00}, // 33 3
-    {0x0E,0x1E,0x36,0x66,0xFE,0x06,0x06,0x00}, // 34 4
-    {0xFE,0xC0,0xFC,0x06,0x06,0xC6,0x7C,0x00}, // 35 5
-    {0x3C,0x60,0xC0,0xFC,0xC6,0xC6,0x7C,0x00}, // 36 6
-    {0xFE,0xC6,0x0C,0x18,0x30,0x30,0x30,0x00}, // 37 7
-    {0x7C,0xC6,0xC6,0x7C,0xC6,0xC6,0x7C,0x00}, // 38 8
-    {0x7C,0xC6,0xC6,0x7E,0x06,0x0C,0x78,0x00}, // 39 9
-    {0x00,0x18,0x18,0x00,0x18,0x18,0x00,0x00}, // 3A :
-    {0x00,0x18,0x18,0x00,0x18,0x18,0x30,0x00}, // 3B ;
-    {0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0x00}, // 3C <
-    {0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00}, // 3D =
-    {0x60,0x30,0x18,0x0C,0x18,0x30,0x60,0x00}, // 3E >
-    {0x3C,0x66,0x06,0x1C,0x18,0x00,0x18,0x00}, // 3F ?
-    {0x7C,0xC6,0xDE,0xD6,0xDE,0xC0,0x7C,0x00}, // 40 @
-    {0x18,0x3C,0x66,0x66,0x7E,0x66,0x66,0x00}, // 41 A
-    {0xFC,0x66,0x66,0x7C,0x66,0x66,0xFC,0x00}, // 42 B
-    {0x3C,0x66,0xC0,0xC0,0xC0,0x66,0x3C,0x00}, // 43 C
-    {0xF8,0x6C,0x66,0x66,0x66,0x6C,0xF8,0x00}, // 44 D
-    {0xFE,0x62,0x68,0x78,0x68,0x62,0xFE,0x00}, // 45 E
-    {0xFE,0x62,0x68,0x78,0x68,0x60,0xF0,0x00}, // 46 F
-    {0x3C,0x66,0xC0,0xC0,0xCE,0x66,0x3E,0x00}, // 47 G
-    {0xC6,0xC6,0xC6,0xFE,0xC6,0xC6,0xC6,0x00}, // 48 H
-    {0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, // 49 I
-    {0x1E,0x0C,0x0C,0x0C,0xCC,0xCC,0x78,0x00}, // 4A J
-    {0xE6,0x66,0x6C,0x78,0x6C,0x66,0xE6,0x00}, // 4B K
-    {0xF0,0x60,0x60,0x60,0x62,0x66,0xFE,0x00}, // 4C L
-    {0xC6,0xEE,0xFE,0xFE,0xD6,0xC6,0xC6,0x00}, // 4D M
-    {0xC6,0xE6,0xF6,0xDE,0xCE,0xC6,0xC6,0x00}, // 4E N
-    {0x38,0x6C,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, // 4F O
-    {0xFC,0x66,0x66,0x7C,0x60,0x60,0xF0,0x00}, // 50 P
-    {0x78,0xCC,0xCC,0xCC,0xDC,0x78,0x1C,0x00}, // 51 Q
-    {0xFC,0x66,0x66,0x7C,0x6C,0x66,0xE6,0x00}, // 52 R
-    {0x7C,0xC6,0xC0,0x7C,0x06,0xC6,0x7C,0x00}, // 53 S
-    {0x7E,0x5A,0x18,0x18,0x18,0x18,0x3C,0x00}, // 54 T
-    {0xC6,0xC6,0xC6,0xC6,0xC6,0xC6,0x7C,0x00}, // 55 U
-    {0xC6,0xC6,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, // 56 V
-    {0xC6,0xC6,0xC6,0xD6,0xFE,0xEE,0xC6,0x00}, // 57 W
-    {0xC6,0xC6,0x6C,0x38,0x6C,0xC6,0xC6,0x00}, // 58 X
-    {0x66,0x66,0x66,0x3C,0x18,0x18,0x3C,0x00}, // 59 Y
-    {0xFE,0xC6,0x8C,0x18,0x32,0x66,0xFE,0x00}, // 5A Z
-    {0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00}, // 5B [
-    {0xC0,0x60,0x30,0x18,0x0C,0x06,0x02,0x00}, // 5C '\'
-    {0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00}, // 5D ]
-    {0x10,0x38,0x6C,0xC6,0x00,0x00,0x00,0x00}, // 5E ^
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF}, // 5F _
-    {0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00}, // 60 `
-    {0x00,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // 61 a
-    {0xE0,0x60,0x60,0x7C,0x66,0x66,0xDC,0x00}, // 62 b
-    {0x00,0x00,0x78,0xCC,0xC0,0xCC,0x78,0x00}, // 63 c
-    {0x1C,0x0C,0x0C,0x7C,0xCC,0xCC,0x76,0x00}, // 64 d
-    {0x00,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00}, // 65 e
-    {0x38,0x6C,0x64,0xF0,0x60,0x60,0xF0,0x00}, // 66 f
-    {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0xF8}, // 67 g
-    {0xE0,0x60,0x6C,0x76,0x66,0x66,0xE6,0x00}, // 68 h
-    {0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // 69 i
-    {0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C}, // 6A j
-    {0xE0,0x60,0x66,0x6C,0x78,0x6C,0xE6,0x00}, // 6B k
-    {0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00}, // 6C l
-    {0x00,0x00,0xCC,0xFE,0xD6,0xC6,0xC6,0x00}, // 6D m
-    {0x00,0x00,0xF8,0xCC,0xCC,0xCC,0xCC,0x00}, // 6E n
-    {0x00,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00}, // 6F o
-    {0x00,0x00,0xDC,0x66,0x66,0x7C,0x60,0xF0}, // 70 p
-    {0x00,0x00,0x76,0xCC,0xCC,0x7C,0x0C,0x1E}, // 71 q
-    {0x00,0x00,0xDC,0x76,0x66,0x60,0xF0,0x00}, // 72 r
-    {0x00,0x00,0x7C,0xC0,0x78,0x0C,0xF8,0x00}, // 73 s
-    {0x10,0x30,0x7C,0x30,0x30,0x34,0x18,0x00}, // 74 t
-    {0x00,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00}, // 75 u
-    {0x00,0x00,0xC6,0xC6,0xC6,0x6C,0x38,0x00}, // 76 v
-    {0x00,0x00,0xC6,0xC6,0xD6,0xFE,0x6C,0x00}, // 77 w
-    {0x00,0x00,0xC6,0x6C,0x38,0x6C,0xC6,0x00}, // 78 x
-    {0x00,0x00,0xCC,0xCC,0xCC,0x7C,0x0C,0xF8}, // 79 y
-    {0x00,0x00,0xFC,0x98,0x30,0x64,0xFC,0x00}, // 7A z
-    {0x1C,0x30,0x30,0xE0,0x30,0x30,0x1C,0x00}, // 7B {
-    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, // 7C |
-    {0xE0,0x30,0x30,0x1C,0x30,0x30,0xE0,0x00}, // 7D }
-    {0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00}, // 7E ~
-    {0x10,0x38,0x6C,0xC6,0xC6,0xFE,0x00,0x00}, // 7F DEL
-    // 0x80..0x9F  extended Latin
-    {0xF8,0xCC,0xCC,0xF8,0xC4,0xCC,0xCE,0x00}, // 80 Ç
-    {0x00,0xCC,0xCC,0xCC,0xCC,0x7C,0x0C,0xF8}, // 81 ü
-    {0x06,0x00,0x7C,0xC6,0xFE,0xC0,0x7C,0x00}, // 82 é
-    {0x7C,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // 83 â
-    {0x00,0xCC,0x00,0x78,0x0C,0x7C,0xCC,0x76}, // 84 ä
-    {0xC0,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // 85 à
-    {0x38,0x6C,0x00,0x78,0x0C,0x7C,0xCC,0x76}, // 86 å
-    {0x00,0x00,0x7C,0xC0,0xC0,0x7C,0x0C,0x38}, // 87 ç
-    {0x7C,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00}, // 88 ê
-    {0x00,0xCC,0x00,0x78,0xCC,0xFC,0xC0,0x78}, // 89 ë
-    {0xC0,0x00,0x78,0xCC,0xFC,0xC0,0x78,0x00}, // 8A è
-    {0x00,0xCC,0x00,0x38,0x18,0x18,0x3C,0x00}, // 8B ï
-    {0x7C,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // 8C î
-    {0xC0,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // 8D ì
-    {0x00,0xC6,0x38,0x6C,0xC6,0xFE,0xC6,0x00}, // 8E Ä
-    {0x38,0x6C,0x38,0x6C,0xC6,0xFE,0xC6,0x00}, // 8F Å
-    {0x1E,0x00,0xFE,0x62,0x78,0x62,0xFE,0x00}, // 90 É
-    {0x00,0x00,0x6E,0x3B,0x1F,0x3B,0x6E,0x00}, // 91 æ
-    {0x00,0x00,0x7E,0xD8,0xFE,0xD8,0x7E,0x00}, // 92 Æ
-    {0x7C,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00}, // 93 ô
-    {0x00,0xCC,0x00,0x78,0xCC,0xCC,0x78,0x00}, // 94 ö
-    {0xC0,0x00,0x78,0xCC,0xCC,0xCC,0x78,0x00}, // 95 ò
-    {0x7C,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00}, // 96 û
-    {0xC0,0x00,0xCC,0xCC,0xCC,0xCC,0x76,0x00}, // 97 ù
-    {0x00,0xCC,0x00,0xCC,0xCC,0x7C,0x0C,0xF8}, // 98 ÿ
-    {0x00,0xC6,0x00,0x7C,0xC6,0xC6,0x7C,0x00}, // 99 Ö
-    {0x00,0xC6,0x00,0xC6,0xC6,0xC6,0x7E,0x00}, // 9A Ü
-    {0x18,0x3C,0x6E,0x68,0x6E,0x3C,0x18,0x00}, // 9B ¢
-    {0x38,0x6C,0x64,0xF0,0x60,0xE6,0xFC,0x00}, // 9C £
-    {0xC6,0xC6,0x7C,0x38,0x7C,0x38,0x10,0xFE}, // 9D ¥
-    {0x00,0x00,0xDC,0x76,0x76,0xDC,0x00,0x00}, // 9E ₧
-    {0x3C,0x66,0x3C,0x00,0x7E,0x00,0x00,0x00}, // 9F ƒ
-    // 0xA0..0xAF
-    {0xC0,0x00,0x78,0x0C,0x7C,0xCC,0x76,0x00}, // A0 á
-    {0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00}, // A1 í
-    {0x00,0x06,0x00,0x78,0xCC,0xCC,0x78,0x00}, // A2 ó
-    {0x00,0x06,0x00,0xCC,0xCC,0xCC,0x76,0x00}, // A3 ú
-    {0x00,0x76,0xDC,0x00,0x00,0x00,0x00,0x00}, // A4 ñ (tilde only, approx)
-    {0x00,0xC6,0x00,0xC6,0xE6,0xF6,0xDE,0xC6}, // A5 Ñ
-    {0x00,0x00,0x00,0xFC,0x60,0x60,0x00,0x00}, // A6 ª
-    {0x00,0x00,0x00,0xFC,0x0C,0x0C,0x00,0x00}, // A7 º
-    {0x3C,0x66,0x3C,0x00,0x00,0x00,0x00,0x00}, // A8 ¿ (approx)
-    {0x10,0x38,0x6C,0xC6,0xFE,0x00,0x00,0x00}, // A9 ⌐
-    {0x7C,0xC6,0xFE,0xC0,0xC0,0xC6,0x7C,0x00}, // AA ¬
-    {0x00,0x00,0x18,0x00,0x7E,0x00,0x18,0x00}, // AB ½
-    {0x00,0x00,0x00,0x7E,0x06,0x0C,0x18,0x00}, // AC ¼
-    {0x18,0x18,0x00,0x18,0x18,0x18,0x18,0x00}, // AD ¡
-    {0x00,0x06,0x0C,0x18,0x30,0x60,0x00,0x00}, // AE «
-    {0x00,0x60,0x30,0x18,0x0C,0x06,0x00,0x00}, // AF »
-    // 0xB0..0xBF  shading + box
-    {0xAA,0x00,0x55,0x00,0xAA,0x00,0x55,0x00}, // B0 ░
-    {0xAA,0x55,0xAA,0x55,0xAA,0x55,0xAA,0x55}, // B1 ▒
-    {0xFF,0xAA,0xFF,0x55,0xFF,0xAA,0xFF,0x55}, // B2 ▓
-    {0x08,0x08,0x08,0x08,0x08,0x08,0x08,0x08}, // B3 │
-    {0x08,0x08,0x08,0xF8,0x08,0x08,0x08,0x08}, // B4 ┤
-    {0x08,0x08,0xF8,0x08,0xF8,0x08,0x08,0x08}, // B5 ╡
-    {0x14,0x14,0x14,0xF4,0x14,0x14,0x14,0x14}, // B6 ╢
-    {0x00,0x00,0x00,0xFC,0x14,0x14,0x14,0x14}, // B7 ╖
-    {0x00,0x00,0xF8,0x08,0xF8,0x14,0x14,0x14}, // B8 ╕
-    {0x14,0x14,0xF4,0x04,0xF4,0x14,0x14,0x14}, // B9 ╣
-    {0x14,0x14,0x14,0x14,0x14,0x14,0x14,0x14}, // BA ║
-    {0x00,0x00,0xFC,0x04,0xF4,0x14,0x14,0x14}, // BB ╗
-    {0x14,0x14,0xF4,0x04,0xFC,0x00,0x00,0x00}, // BC ╝
-    {0x14,0x14,0x14,0xFC,0x00,0x00,0x00,0x00}, // BD ╜
-    {0x00,0x00,0xFC,0x14,0xFC,0x00,0x00,0x00}, // BE ╛
-    {0x00,0x00,0x00,0xF8,0x08,0x08,0x08,0x08}, // BF ┐
-    // 0xC0..0xCF  box continued
-    {0x08,0x08,0x08,0x0F,0x00,0x00,0x00,0x00}, // C0 └
-    {0x08,0x08,0x08,0xFF,0x00,0x00,0x00,0x00}, // C1 ┴
-    {0x00,0x00,0x00,0xFF,0x08,0x08,0x08,0x08}, // C2 ┬
-    {0x08,0x08,0x08,0x0F,0x08,0x08,0x08,0x08}, // C3 ├
-    {0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0x00}, // C4 ─
-    {0x08,0x08,0x08,0xFF,0x08,0x08,0x08,0x08}, // C5 ┼
-    {0x08,0x08,0x0F,0x08,0x0F,0x14,0x14,0x14}, // C6 ╞
-    {0x14,0x14,0x14,0x17,0x14,0x14,0x14,0x14}, // C7 ╟
-    {0x14,0x14,0xF7,0x00,0xFF,0x00,0x00,0x00}, // C8 ╚
-    {0x00,0x00,0xFF,0x00,0xF7,0x14,0x14,0x14}, // C9 ╔
-    {0x14,0x14,0x17,0x10,0x17,0x14,0x14,0x14}, // CA ╩
-    {0x00,0x00,0xF7,0x10,0xF7,0x14,0x14,0x14}, // CB ╦
-    {0x14,0x14,0x14,0xF4,0x14,0x14,0x14,0x14}, // CC ╠
-    {0x00,0x00,0xFF,0x00,0xFF,0x00,0x00,0x00}, // CD ═
-    {0x14,0x14,0xF4,0x04,0xF4,0x14,0x14,0x14}, // CE ╬
-    {0x00,0x00,0xFF,0x00,0xFF,0x08,0x08,0x08}, // CF ╧
-    // 0xD0..0xDF
-    {0x08,0x08,0xFF,0x00,0xFF,0x00,0x00,0x00}, // D0 ╨
-    {0x00,0x00,0xFF,0x14,0xFF,0x00,0x00,0x00}, // D1 ╤
-    {0x00,0x00,0xFF,0x14,0x14,0x14,0x14,0x14}, // D2 ╥
-    {0x14,0x14,0x14,0xFE,0x00,0x00,0x00,0x00}, // D3 ╙
-    {0x14,0x14,0xF7,0x00,0xF7,0x00,0x00,0x00}, // D4 ╘
-    {0x00,0x00,0xF7,0x14,0xF7,0x00,0x00,0x00}, // D5 ╒
-    {0x00,0x00,0x14,0xFE,0x14,0x00,0x00,0x00}, // D6 ╓
-    {0x08,0x08,0xFF,0x08,0xFF,0x14,0x14,0x14}, // D7 ╫
-    {0x14,0x14,0x14,0xFF,0x14,0x14,0x14,0x14}, // D8 ╪
-    {0x08,0x08,0x08,0xF8,0x00,0x00,0x00,0x00}, // D9 ┘
-    {0x00,0x00,0x00,0x0F,0x08,0x08,0x08,0x08}, // DA ┌
-    {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, // DB █
-    {0x00,0x00,0x00,0x00,0xFF,0xFF,0xFF,0xFF}, // DC ▄
-    {0xF0,0xF0,0xF0,0xF0,0xF0,0xF0,0xF0,0xF0}, // DD ▌
-    {0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F}, // DE ▐
-    {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00}, // DF ▀
-    // 0xE0..0xFF  Greek / math
-    {0x00,0x00,0x6E,0x91,0x91,0x91,0x6E,0x00}, // E0 α
-    {0xFE,0x66,0x66,0x7E,0x66,0x66,0xFE,0x30}, // E1 ß
-    {0x00,0x00,0xFF,0xCC,0xCC,0xCC,0x33,0x00}, // E2 Γ
-    {0x00,0x00,0xFF,0xCC,0xCC,0xCC,0xCC,0x00}, // E3 π
-    {0x7F,0x04,0x7F,0x04,0x04,0x04,0x04,0x00}, // E4 Σ
-    {0x00,0x00,0x7F,0xDB,0xDB,0x7F,0x00,0x00}, // E5 σ
-    {0x00,0x00,0xDB,0xDB,0xDB,0x7F,0x00,0x00}, // E6 µ
-    {0x00,0x00,0x10,0x7C,0x10,0x7C,0x10,0x00}, // E7 τ
-    {0x00,0x00,0x7C,0x42,0x7C,0x40,0x40,0x00}, // E8 Φ
-    {0x00,0x66,0x3C,0x18,0x3C,0x66,0x00,0x00}, // E9 Θ
-    {0x00,0x00,0xC6,0xAA,0x92,0xAA,0xC6,0x00}, // EA Ω
-    {0x00,0x00,0x66,0x66,0x3C,0x18,0x18,0x00}, // EB δ
-    {0x00,0x78,0x18,0x18,0x3C,0x18,0x18,0x78}, // EC ∞
-    {0x00,0x00,0x7C,0xC6,0xC6,0x7C,0x44,0x6C}, // ED φ
-    {0x00,0x66,0x3C,0x18,0x18,0x18,0x18,0x00}, // EE ε
-    {0x00,0x00,0xFF,0x08,0x04,0x08,0xFF,0x00}, // EF ∩
-    {0x00,0x00,0xFF,0x80,0x80,0x80,0xFF,0x00}, // F0 ≡
-    {0x00,0x10,0xFE,0x11,0xFF,0x10,0xFE,0x00}, // F1 ±
-    {0xFE,0xC0,0xC0,0xC0,0xFE,0x00,0x00,0x00}, // F2 ≥
-    {0xFE,0x06,0x06,0x06,0xFE,0x00,0x00,0x00}, // F3 ≤
-    {0x18,0x18,0x18,0x18,0xF8,0x18,0x18,0x00}, // F4 ⌠
-    {0x18,0x18,0x18,0x18,0x1F,0x18,0x18,0x00}, // F5 ⌡
-    {0x00,0x18,0x00,0xFF,0x00,0x18,0x00,0x00}, // F6 ÷
-    {0x00,0x00,0x76,0xDC,0x00,0x76,0xDC,0x00}, // F7 ≈
-    {0x38,0x6C,0x6C,0x38,0x00,0x00,0x00,0x00}, // F8 °
-    {0x00,0x00,0x00,0x18,0x18,0x00,0x00,0x00}, // F9 ∙
-    {0x00,0x00,0x00,0x18,0x00,0x00,0x00,0x00}, // FA ·
-    {0x18,0x38,0x18,0x18,0x3C,0x00,0x00,0x00}, // FB √
-    {0x3C,0x66,0x0C,0x18,0x00,0x7E,0x00,0x00}, // FC ⁿ
-    {0x3C,0x66,0x0C,0x18,0x30,0x66,0x3C,0x00}, // FD ²
-    {0x00,0xFF,0xDB,0xDB,0xDB,0xFF,0x00,0x00}, // FE ■
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // FF NBSP
-};
-
-static inline uint8_t __mp_gfx_font_row(uint8_t c, int row) {
-    return __mp_gfx_font[c][row];
-}
-
-static inline int32_t __mp_gfx_abs(int32_t v) { return v < 0 ? -v : v; }
-static inline int32_t __mp_gfx_sign(int32_t v) { return v > 0 ? 1 : (v < 0 ? -1 : 0); }
-
-static inline int32_t __mp_gfx_isqrt(int32_t n) {
-    if (n <= 0) return 0;
-    int32_t x = n, y = (x + 1) / 2;
-    while (y < x) { x = y; y = (x + n / x) / 2; }
-    return x;
-}
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -399,97 +200,26 @@ static inline void    __mp_task_exit(void)           { vTaskDelete(NULL); }
 static inline void    __mp_task_notify(void* handle) { xTaskNotify((TaskHandle_t)handle, 0, eNoAction); }
 static inline int32_t __mp_task_wait(void)           { return (int32_t)ulTaskNotifyTake(pdTRUE, portMAX_DELAY); }
 #include <string.h>
-
-// 128×32 page buffer: byte[0] = 0x40 (I2C data control), byte[1..512] = page-major pixels.
-// Page p, column c -> page[p*128 + c + 1]; bit (y & 7) within byte, LSB = top row.
-static uint8_t __mp_ssd1306_32_page[513];
-
-// Convert a linear Mono strip (row-major, MSB-left) into the page buffer and send.
-// dx,dy: destination offset in the 128×32 display.
-// w,h:   strip dimensions.
-// buf:   source slice in Mono format (stride = (w+7)/8 bytes per row).
-static void __mp_ssd1306_32_blit(int32_t dx, int32_t dy, int32_t w, int32_t h,
-                                  __Slice_uint8_t buf) {
-    int stride = (w + 7) / 8;
-    for (int ry = 0; ry < h; ry++) {
-        int abs_y = dy + ry;
-        if ((uint32_t)abs_y >= 32u) continue;
-        int page = abs_y >> 3;
-        int bit  = abs_y & 7;
-        const uint8_t *src_row = buf.data + ry * stride;
-        for (int rx = 0; rx < w; rx++) {
-            int abs_x = dx + rx;
-            if ((uint32_t)abs_x >= 128u) continue;
-            int pixel = (src_row[rx >> 3] >> (7 - (rx & 7))) & 1;
-            uint8_t *p = __mp_ssd1306_32_page + 1 + page * 128 + abs_x;
-            if (pixel) *p |= (uint8_t)(1u << bit);
-            else       *p &= ~(uint8_t)(1u << bit);
-        }
-    }
-}
-
-static inline __Slice_uint8_t __mp_ssd1306_32_page_slice(void) {
-    return (__Slice_uint8_t){ __mp_ssd1306_32_page, 513 };
-}
 #include "driver/gpio.h"
 
-typedef enum {
-  DisplayInterface_I2C = 0,
-  DisplayInterface_SPI = 1,
-} DisplayInterface;
-
-typedef enum {
-  DisplayColor_MONO = 0,
-  DisplayColor_RGB565 = 1,
-} DisplayColor;
-
-typedef enum {
-  Rotation_R0 = 0,
-  Rotation_R90 = 1,
-  Rotation_R180 = 2,
-  Rotation_R270 = 3,
-} Rotation;
-
-typedef enum {
-  PixelFormat_Mono = 0,
-  PixelFormat_Index1 = 1,
-  PixelFormat_Index2 = 2,
-  PixelFormat_Index4 = 3,
-  PixelFormat_Index8 = 4,
-  PixelFormat_RGB565 = 5,
-} PixelFormat;
-
-typedef enum {
-  Node_Canvas,
-} Node_Tag;
-
-typedef struct {
-  Canvas canvas;
-} Node_Canvas_Data;
-
-struct Node {
-  Node_Tag tag;
-  union {
-    Node_Canvas_Data Canvas;
-  } data;
-};
-
-typedef enum {
-  GpioMode_INPUT = 1,
-  GpioMode_OUTPUT = 3,
-  GpioMode_INPUT_PULLUP = 5,
-  GpioMode_INPUT_PULLDOWN = 6,
-} GpioMode;
-
-typedef enum {
-  GpioLevel_LOW = 0,
-  GpioLevel_HIGH = 1,
-} GpioLevel;
-
-struct GfxDriver {
+struct GraphicsDriver {
   int32_t width;
   int32_t height;
-  __Fn_void_int32_t_int32_t_int32_t_int32_t_Slice_uint8_t flush;
+  __Fn_void_Rotation set_rotation;
+  __Fn_void wait;
+  __Fn_void_Rect_p_Slice_uint8_t flush;
+};
+
+struct Point {
+  int32_t x;
+  int32_t y;
+};
+
+struct Rect {
+  int32_t x;
+  int32_t y;
+  int32_t width;
+  int32_t height;
 };
 
 struct DisplayConn {
@@ -500,25 +230,50 @@ struct DisplayConn {
   int32_t back_light_pin;
 };
 
-struct DisplayInfo {
-  int32_t width;
-  int32_t height;
-  DisplayColor color;
+struct Node {
+  void* handle;
+  __Fn_void_RenderContext_p_Point_p_void_p renderer;
+};
+
+struct RenderContext {
+  __Slice_uint8_t buffer;
+  PixelFormat format;
+  Rect viewpoint;
 };
 
 struct Canvas {
-  __Slice_uint8_t buf;
-  int32_t x;
-  int32_t y;
-  int32_t width;
-  int32_t height;
-  PixelFormat format;
-  Palette* palette;
+  Node _node;
+  __Slice_uint8_t _buffer;
+  Rect _viewpoint;
+  uint16_t _background;
+  IndexFormat _index_format;
+  __Slice_uint16_t _palette;
   __Fn_void_int32_t_int32_t_int32_t _set_pixel_fn;
+  __Fn_void_RenderContext_p_Rect_p_Point_p _render_fn;
 };
 
-struct Palette {
-  __Slice_uint16_t colors;
+struct Graphics {
+  GraphicsDriver* _driver;
+  Node* _root;
+  uint16_t _background;
+  bool _dirty_render;
+  Rect _render_window;
+  __Slice_uint8_t _strip0;
+  __Slice_uint8_t _strip1;
+  bool _single_buffer;
+  int32_t _front_buffer;
+  RenderContext _context;
+};
+
+struct Ssd1306 {
+  uint8_t heap[1600];
+  uint8_t strip[512];
+  GraphicsDriver driver;
+  Graphics gfx;
+  int32_t _dev;
+  int32_t _width;
+  int32_t _height;
+  __Slice_uint8_t _page_buf;
 };
 
 void main__main(void);
@@ -528,133 +283,110 @@ void i2c__i2c_close(int32_t dev);
 int32_t i2c__i2c_write(int32_t dev, __Slice_uint8_t data, int32_t len);
 int32_t i2c__i2c_read(int32_t dev, __Slice_uint8_t buf, int32_t len);
 int32_t i2c__i2c_write_read(int32_t dev, __Slice_uint8_t tx, int32_t tx_len, __Slice_uint8_t rx, int32_t rx_len);
-GfxDriver* gfx__gfx_driver(void);
-static void gfx___strip_pixel_mono(int32_t px, int32_t py, int32_t color);
-static void gfx___strip_fill_mono(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color);
-static void gfx___strip_pixel_rgb565(int32_t px, int32_t py, int32_t color);
-static void gfx___strip_fill_rgb565(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color);
-static void gfx___pixel_r0(int32_t x, int32_t y, int32_t color);
-static void gfx___pixel_r90(int32_t x, int32_t y, int32_t color);
-static void gfx___pixel_r180(int32_t x, int32_t y, int32_t color);
-static void gfx___pixel_r270(int32_t x, int32_t y, int32_t color);
-static void gfx___fill_r0(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-static void gfx___fill_r90(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-static void gfx___fill_r180(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-static void gfx___fill_r270(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void gfx__gfx_set_rotation(Rotation r);
-void gfx__gfx_set_strip(__Slice_uint8_t buf, PixelFormat fmt);
-void gfx__gfx_init(void);
-int32_t gfx__gfx_width(void);
-int32_t gfx__gfx_height(void);
-void gfx__gfx_pixel(int32_t x, int32_t y, int32_t color);
-void gfx__gfx_hline(int32_t x, int32_t y, int32_t w, int32_t color);
-void gfx__gfx_vline(int32_t x, int32_t y, int32_t h, int32_t color);
-void gfx__gfx_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
-void gfx__gfx_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void gfx__gfx_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void gfx__gfx_clear(int32_t color);
-static void gfx___circle_8(int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color);
-void gfx__gfx_circle(int32_t cx, int32_t cy, int32_t r, int32_t color);
-void gfx__gfx_fill_circle(int32_t cx, int32_t cy, int32_t r, int32_t color);
-static void gfx___line_raw(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
-void gfx__gfx_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
-void gfx__gfx_fill_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
-void gfx__gfx_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
-void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
-static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
-void gfx__gfx_char(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale);
-int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int32_t bg, int32_t scale);
-void gfx__gfx_render(Node* node, int32_t bias_x, int32_t bias_y);
-static inline int32_t math__floor_fixed(int32_t v);
-static inline int32_t math__ceil_fixed(int32_t v);
-static inline int32_t math__round_fixed(int32_t v);
-DisplayConn* display__display_conn(void);
-DisplayInfo* display__display_info(void);
-static int32_t drivers__ssd1306_128x32___cmd1(int32_t dev, int32_t c);
-static int32_t drivers__ssd1306_128x32___cmd2(int32_t dev, int32_t c, int32_t v);
-static void drivers__ssd1306_128x32___hw_init(int32_t dev);
-static void drivers__ssd1306_128x32___send_page(int32_t dev);
-static void drivers__ssd1306_128x32___gfx_flush(int32_t x, int32_t y, int32_t w, int32_t h, __Slice_uint8_t buf);
-void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver);
-void gpio__gpio_mode(int32_t pin, GpioMode mode);
-static inline void gpio__gpio_write(int32_t pin, GpioLevel value);
-static inline GpioLevel gpio__gpio_read(int32_t pin);
-void Canvas_set_format(Canvas* this, PixelFormat fmt);
-void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color);
-void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t color);
-void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t h, int32_t color);
+void Graphics_set_root(Graphics* this, Node* node);
+void Graphics_init(Graphics* this, GraphicsDriver* driver, __Slice_uint8_t buffer0, __Slice_uint8_t buffer1, PixelFormat pixel_format, uint16_t background, Rotation rotation, bool dirty_render);
+void Graphics_mark_dirty(Graphics* this, Rect* rect);
+void Graphics_render(Graphics* this);
+static __Slice_uint8_t Graphics__front_strip(Graphics* this);
+static __Slice_uint8_t Graphics__back_strip(Graphics* this);
+static void Graphics__clear_strip(Graphics* this, __Slice_uint8_t buffer);
+static inline void Point_copy(Point* this, Point* point);
+static inline void Rect_copy(Rect* this, Rect* rect);
+static inline bool Rect_intersect(Rect* this, Rect* rect);
+static inline bool Rect_contains(Rect* this, Point* point);
+static inline void Rect_merge(Rect* this, Rect* rect);
+static int32_t drivers__ssd1306___cmd1(int32_t dev, int32_t c);
+static int32_t drivers__ssd1306___cmd2(int32_t dev, int32_t c, int32_t v);
+static void drivers__ssd1306___hw_init_128x32(int32_t dev);
+static void drivers__ssd1306___hw_init_128x64(int32_t dev);
+static void drivers__ssd1306___attach(Ssd1306* d, DisplayConn* conn, int32_t w, int32_t h);
+Ssd1306* drivers__ssd1306__attach_ssd1306_128x32(Ssd1306* d, DisplayConn* conn);
+Ssd1306* drivers__ssd1306__attach_ssd1306_128x64(Ssd1306* d, DisplayConn* conn);
+static void Ssd1306__set_rotation(Ssd1306* this, Rotation r);
+static void Ssd1306__wait(Ssd1306* this);
+static void Ssd1306__blit(Ssd1306* this, Rect* rect, __Slice_uint8_t src);
+static void Ssd1306__flush(Ssd1306* this, Rect* rect, __Slice_uint8_t buf);
+static void Ssd1306__send_page(Ssd1306* this);
+Canvas* node__canvas__create_canvas(Allocator* allocator, Rect* rect, uint16_t background, IndexFormat index_format, __Slice_uint16_t palette);
+void node__canvas__render_canvas(RenderContext* context, Point* offset, void* handle);
+Node* Canvas_get_node(Canvas* this);
+static inline void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color);
+static inline void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t color);
+static inline void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t height, int32_t color);
 void Canvas_draw_line(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
-void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
-void Canvas_clear(Canvas* this, int32_t color);
+void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color);
+static inline void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color);
+void Canvas_clear(Canvas* this);
 void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color);
 void Canvas_fill_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color);
 void Canvas_draw_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
 void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
-void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
-void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color);
-static void Canvas__set_pixel(Canvas* this, int32_t x, int32_t y, int32_t color);
-static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color);
+void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color);
+void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color);
+static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color);
 static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color);
-static void Canvas__line_raw(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color);
-static void Canvas__set_pixel_rgb565(Canvas* this, int32_t x, int32_t y, int32_t color);
-static void Canvas__set_pixel_mono(Canvas* this, int32_t x, int32_t y, int32_t color);
 static void Canvas__set_pixel_index1(Canvas* this, int32_t x, int32_t y, int32_t color);
 static void Canvas__set_pixel_index2(Canvas* this, int32_t x, int32_t y, int32_t color);
 static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t color);
 static void Canvas__set_pixel_index8(Canvas* this, int32_t x, int32_t y, int32_t color);
+static void Canvas__render_index1(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset);
+static void Canvas__render_index2(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset);
+static void Canvas__render_index4(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset);
+static void Canvas__render_index8(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset);
 static inline int32_t Canvas__abs(Canvas* this, int32_t v);
 static inline int32_t Canvas__sign(Canvas* this, int32_t v);
-static inline int32_t Canvas__isqrt(Canvas* this, int32_t n);
-void Palette_set(Palette* this, int32_t index, uint16_t rgb565);
-uint16_t Palette_get(Palette* this, int32_t index);
+static inline int32_t Canvas__sqrt(Canvas* this, int32_t n);
+static inline int32_t math__floor_q16(int32_t value);
+static inline int32_t math__ceil_q16(int32_t value);
+static inline int32_t math__round_q16(int32_t value);
+static inline int32_t math__floor_fixed(int32_t value);
+static inline int32_t math__ceil_fixed(int32_t value);
+static inline int32_t math__round_fixed(int32_t value);
+static inline bool RenderContext_intersect(RenderContext* this, Rect rect);
+void RenderContext_set_pixel(RenderContext* this, Point* point, int32_t color);
+void RenderContext_fill_rect(RenderContext* this, Rect* rect, int32_t color);
+static inline void RenderContext__set_pixel_mono(RenderContext* this, int32_t x, int32_t y, int32_t color);
+static inline void RenderContext__set_pixel_rgb565(RenderContext* this, int32_t x, int32_t y, int32_t color);
+static inline void memory__memory_zero(__Slice_uint8_t dst, int32_t size);
+void gpio__gpio_mode(int32_t pin, GpioMode mode);
+static inline void gpio__gpio_write(int32_t pin, GpioLevel value);
+static inline GpioLevel gpio__gpio_read(int32_t pin);
 static inline int32_t math__min_int32_t(int32_t a, int32_t b);
+static inline int32_t math__max_int32_t(int32_t a, int32_t b);
 
-const __Slice_uint8_t main__MESSAGE = (__Slice_uint8_t){(uint8_t*)"Hello, world!             ", sizeof("Hello, world!             ") - 1};
-const int32_t main__TOTAL_CHARS = 13;
-static uint8_t main___strip_buf[512];
-static GfxDriver gfx___driver;
-static __Slice_uint8_t gfx___strip;
-static PixelFormat gfx___format;
-static int32_t gfx___view_w;
-static int32_t gfx___view_h;
-static __Fn_void_int32_t_int32_t_int32_t gfx___pixel_fn;
-static __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t gfx___fill_fn;
-static __Fn_void_int32_t_int32_t_int32_t gfx___phys_pixel_fn;
-static __Fn_void_int32_t_int32_t_int32_t_int32_t_int32_t gfx___phys_fill_fn;
-static DisplayConn display___conn;
-static DisplayInfo display___info;
+const int32_t main__HEAP_SIZE = 1600;
+static uint8_t main___heap[1600];
+static uint8_t main___strip[512];
+static Ssd1306 main___driver;
+static Graphics main___gfx;
+int32_t drivers__ssd1306__HEAP_SIZE = 1040;
+const uint16_t palette__TRANSPARENT = 0x0020;
+uint16_t palette__PALETTE_MONO[2] = {0x0000, 0xFFFF};
+uint16_t palette__PALETTE_GRAY4[4] = {0x0000, 0x52AA, 0xAD55, 0xFFFF};
+uint16_t palette__PALETTE_GRAY16[16] = {0x0000, 0x1082, 0x2104, 0x3186, 0x4208, 0x528A, 0x630C, 0x738E, 0x8410, 0x9492, 0xA514, 0xB596, 0xC618, 0xD69A, 0xE71C, 0xFFFF};
+uint16_t palette__PALETTE_UI16[16] = {0x0000, 0xFFFF, 0xF800, 0x07E0, 0x001F, 0xFFE0, 0x07FF, 0xF81F, 0x39E7, 0xC618, 0x8000, 0x0400, 0x000F, 0xFD20, 0x8010, 0x07A0};
 
 void main__main(void) {
   int32_t bus = i2c__i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ);
   int32_t dev = i2c__i2c_open(bus, OLED_ADDR);
-  DisplayConn* conn = display__display_conn();
-  (conn->interface = DisplayInterface_I2C);
-  (conn->device = dev);
-  (conn->reset_pin = (-1));
-  (conn->back_light_pin = (-1));
-  drivers__ssd1306_128x32__display_attach_gfx(gfx__gfx_driver());
-  gfx__gfx_set_strip((__Slice_uint8_t){(&main___strip_buf[0]), 512}, PixelFormat_Mono);
-  gfx__gfx_init();
-  gfx__gfx_clear(0);
-  gfx__gfx_rect(0, 0, 128, 32, 1);
-  int32_t location = 0;
-  int32_t first_char = 0;
-  int32_t x = 0;
+  DisplayConn conn = {0};
+  (conn.interface = DisplayInterface_I2C);
+  (conn.device = dev);
+  (conn.dc_pin = (-1));
+  (conn.reset_pin = (-1));
+  (conn.back_light_pin = (-1));
+  Allocator alloc;
+  alloc.init((__Slice_uint8_t){(&main___heap[0]), drivers__ssd1306__HEAP_SIZE});
+  drivers__ssd1306__attach_ssd1306_128x32((&main___driver), (&conn));
+  Rect rect = (Rect){0, 0, 128, 32};
+  Canvas* canvas = node__canvas__create_canvas((&alloc), (&rect), 0, IndexFormat_Index1, (__Slice_uint16_t){palette__PALETTE_MONO, 2});
+  Canvas_clear(canvas);
+  Canvas_draw_rect(canvas, 0, 0, 128, 32, 1);
+  Graphics_init((&main___gfx), (&main___driver.driver), (__Slice_uint8_t){(&main___strip[0]), 512}, (__Slice_uint8_t){NULL, 0}, PixelFormat_Mono, 0, Rotation_R0, false);
+  Graphics_set_root((&main___gfx), Canvas_get_node(canvas));
+  Graphics_render((&main___gfx));
   while (true) {
-    if ((location < 0)) {
-      (first_char = (-location));
-      (x = 4);
-    } else {
-      (first_char = 0);
-      (x = ((location * 9) + 4));
-    }
-    gfx__gfx_str(x, 12, (__Slice_uint8_t){(&main__MESSAGE.ptr[first_char]), math__min_int32_t((main__TOTAL_CHARS - location), main__TOTAL_CHARS)}, 1, 0, 1);
-    (location -= 1);
-    if ((location < (-main__TOTAL_CHARS))) {
-      (location = (main__TOTAL_CHARS - 1));
-    }
-    __mp_delay_ms(200);
+    __mp_delay_ms(1000);
   }
 }
 
@@ -682,470 +414,163 @@ int32_t i2c__i2c_write_read(int32_t dev, __Slice_uint8_t tx, int32_t tx_len, __S
   return __mp_i2c_write_read(dev, tx, tx_len, rx, rx_len);
 }
 
-GfxDriver* gfx__gfx_driver(void) {
-  return (&gfx___driver);
+void Graphics_set_root(Graphics* this, Node* node) {
+  (this->_root = node);
 }
 
-static void gfx___strip_pixel_mono(int32_t px, int32_t py, int32_t color) {
-  int32_t stride = ((gfx___driver.width + 7) / 8);
-  int32_t idx = ((py * stride) + (px / 8));
-  if ((color != 0)) {
-    (gfx___strip.ptr[idx] = (gfx___strip.ptr[idx] | ((uint8_t)((0x80 >> (px & 7))))));
+void Graphics_init(Graphics* this, GraphicsDriver* driver, __Slice_uint8_t buffer0, __Slice_uint8_t buffer1, PixelFormat pixel_format, uint16_t background, Rotation rotation, bool dirty_render) {
+  (this->_driver = driver);
+  (this->_strip0 = buffer0);
+  (this->_strip1 = buffer1);
+  (this->_context.format = pixel_format);
+  (this->_background = background);
+  (this->_dirty_render = dirty_render);
+  if ((buffer1.size == 0)) {
+    (this->_single_buffer = true);
+  }
+  (this->_render_window.x = 0);
+  (this->_render_window.y = 0);
+  if (this->_dirty_render) {
+    (this->_render_window.width = 0);
+    (this->_render_window.height = 0);
+  }
+  Ssd1306_set_rotation((&this->_driver), rotation);
+  if (((rotation == Rotation_R0) || (rotation == Rotation_R180))) {
+    if ((!this->_dirty_render)) {
+      (this->_render_window.width = this->_driver.width);
+      (this->_render_window.height = this->_driver.height);
+    }
   } else {
-    (gfx___strip.ptr[idx] = (gfx___strip.ptr[idx] & ((uint8_t)((~(0x80 >> (px & 7)))))));
-  }
-}
-
-static void gfx___strip_fill_mono(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color) {
-  int32_t iy = py;
-  while ((iy < (py + h))) {
-    int32_t ix = px;
-    while ((ix < (px + w))) {
-      gfx___strip_pixel_mono(ix, iy, color);
-      (ix += 1);
+    if ((!this->_dirty_render)) {
+      (this->_render_window.width = this->_driver.height);
+      (this->_render_window.height = this->_driver.width);
     }
-    (iy += 1);
+  }
+  (this->_front_buffer = 0);
+}
+
+void Graphics_mark_dirty(Graphics* this, Rect* rect) {
+  int32_t aligned_x = rect->x;
+  int32_t aligned_width = rect->width;
+  if ((this->_context.format == PixelFormat_Mono)) {
+    int32_t right = (((rect->x + rect->width) + 7) & (~7));
+    (aligned_x = (rect->x & (~7)));
+    (aligned_width = (right - aligned_x));
+  }
+  Rect aligned = (Rect){aligned_x, rect->y, aligned_width, rect->height};
+  if (((this->_render_window.width == 0) && (this->_render_window.height == 0))) {
+    Rect_copy((&this->_render_window), (&aligned));
+  } else {
+    Rect_merge((&this->_render_window), (&aligned));
   }
 }
 
-static void gfx___strip_pixel_rgb565(int32_t px, int32_t py, int32_t color) {
-  int32_t idx = (((py * gfx___driver.width) + px) * 2);
-  (gfx___strip.ptr[idx] = ((uint8_t)((color >> 8))));
-  (gfx___strip.ptr[(idx + 1)] = ((uint8_t)(color)));
-}
-
-static void gfx___strip_fill_rgb565(int32_t px, int32_t py, int32_t w, int32_t h, int32_t color) {
-  int32_t iy = py;
-  while ((iy < (py + h))) {
-    int32_t ix = px;
-    while ((ix < (px + w))) {
-      gfx___strip_pixel_rgb565(ix, iy, color);
-      (ix += 1);
-    }
-    (iy += 1);
-  }
-}
-
-static void gfx___pixel_r0(int32_t x, int32_t y, int32_t color) {
-  gfx___phys_pixel_fn(x, y, color);
-}
-
-static void gfx___pixel_r90(int32_t x, int32_t y, int32_t color) {
-  gfx___phys_pixel_fn(((gfx___driver.width - 1) - y), x, color);
-}
-
-static void gfx___pixel_r180(int32_t x, int32_t y, int32_t color) {
-  gfx___phys_pixel_fn(((gfx___driver.width - 1) - x), ((gfx___driver.height - 1) - y), color);
-}
-
-static void gfx___pixel_r270(int32_t x, int32_t y, int32_t color) {
-  gfx___phys_pixel_fn(y, ((gfx___driver.height - 1) - x), color);
-}
-
-static void gfx___fill_r0(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___phys_fill_fn(x, y, w, h, color);
-}
-
-static void gfx___fill_r90(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___phys_fill_fn(((gfx___driver.width - y) - h), x, h, w, color);
-}
-
-static void gfx___fill_r180(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___phys_fill_fn(((gfx___driver.width - x) - w), ((gfx___driver.height - y) - h), w, h, color);
-}
-
-static void gfx___fill_r270(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___phys_fill_fn(y, ((gfx___driver.height - x) - w), h, w, color);
-}
-
-void gfx__gfx_set_rotation(Rotation r) {
-  if ((r == Rotation_R0)) {
-    (gfx___pixel_fn = gfx___pixel_r0);
-    (gfx___fill_fn = gfx___fill_r0);
-    (gfx___view_w = gfx___driver.width);
-    (gfx___view_h = gfx___driver.height);
-  }
-  if ((r == Rotation_R90)) {
-    (gfx___pixel_fn = gfx___pixel_r90);
-    (gfx___fill_fn = gfx___fill_r90);
-    (gfx___view_w = gfx___driver.height);
-    (gfx___view_h = gfx___driver.width);
-  }
-  if ((r == Rotation_R180)) {
-    (gfx___pixel_fn = gfx___pixel_r180);
-    (gfx___fill_fn = gfx___fill_r180);
-    (gfx___view_w = gfx___driver.width);
-    (gfx___view_h = gfx___driver.height);
-  }
-  if ((r == Rotation_R270)) {
-    (gfx___pixel_fn = gfx___pixel_r270);
-    (gfx___fill_fn = gfx___fill_r270);
-    (gfx___view_w = gfx___driver.height);
-    (gfx___view_h = gfx___driver.width);
-  }
-}
-
-void gfx__gfx_set_strip(__Slice_uint8_t buf, PixelFormat fmt) {
-  (gfx___strip = buf);
-  (gfx___format = fmt);
-}
-
-void gfx__gfx_init(void) {
-  if ((gfx___format == PixelFormat_Mono)) {
-    (gfx___phys_pixel_fn = gfx___strip_pixel_mono);
-    (gfx___phys_fill_fn = gfx___strip_fill_mono);
-  }
-  if ((gfx___format == PixelFormat_RGB565)) {
-    (gfx___phys_pixel_fn = gfx___strip_pixel_rgb565);
-    (gfx___phys_fill_fn = gfx___strip_fill_rgb565);
-  }
-  gfx__gfx_set_rotation(Rotation_R0);
-}
-
-int32_t gfx__gfx_width(void) {
-  return gfx___view_w;
-}
-
-int32_t gfx__gfx_height(void) {
-  return gfx___view_h;
-}
-
-void gfx__gfx_pixel(int32_t x, int32_t y, int32_t color) {
-  if (((((x < 0) || (x >= gfx___view_w)) || (y < 0)) || (y >= gfx___view_h))) {
+void Graphics_render(Graphics* this) {
+  if (((this->_render_window.width == 0) || (this->_render_window.height == 0))) {
     return;
   }
-  gfx___pixel_fn(x, y, color);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-void gfx__gfx_hline(int32_t x, int32_t y, int32_t w, int32_t color) {
-  if ((((w <= 0) || (y < 0)) || (y >= gfx___view_h))) {
-    return;
+  (this->_context.buffer = Graphics__back_strip(this));
+  (this->_context.viewpoint.x = this->_render_window.x);
+  (this->_context.viewpoint.width = this->_render_window.width);
+  int32_t row_bytes = 0;
+  if ((this->_context.format == PixelFormat_Mono)) {
+    (row_bytes = ((this->_context.viewpoint.width + 7) / 8));
+  } else {
+    (row_bytes = (this->_context.viewpoint.width * 2));
   }
-  if ((x < 0)) {
-    (w += x);
-    (x = 0);
+  int32_t strip_rows = (((this->_context.buffer.size + row_bytes) - 1) / row_bytes);
+  int32_t strip_count = (((this->_render_window.height + strip_rows) - 1) / strip_rows);
+  Point offset = (Point){0, 0};
+  for (int32_t strip_index = 0; strip_index < strip_count; strip_index++) {
+    (this->_context.viewpoint.y = (this->_render_window.y + (strip_index * strip_rows)));
+    (this->_context.viewpoint.height = math__min_int32_t(strip_rows, ((this->_render_window.y + this->_render_window.height) - this->_context.viewpoint.y)));
+    Graphics__clear_strip(this, this->_context.buffer);
+    this->_root->renderer((&this->_context), (&offset), this->_root->handle);
+    Ssd1306_wait((&this->_driver));
+    (this->_front_buffer = (1 - this->_front_buffer));
+    Ssd1306_flush((&this->_driver), (&this->_context.viewpoint), Graphics__front_strip(this));
   }
-  if (((x + w) > gfx___view_w)) {
-    (w = (gfx___view_w - x));
-  }
-  if ((w <= 0)) {
-    return;
-  }
-  gfx___fill_fn(x, y, w, 1, color);
-}
-
-void gfx__gfx_vline(int32_t x, int32_t y, int32_t h, int32_t color) {
-  if ((((h <= 0) || (x < 0)) || (x >= gfx___view_w))) {
-    return;
-  }
-  if ((y < 0)) {
-    (h += y);
-    (y = 0);
-  }
-  if (((y + h) > gfx___view_h)) {
-    (h = (gfx___view_h - y));
-  }
-  if ((h <= 0)) {
-    return;
-  }
-  gfx___fill_fn(x, y, 1, h, color);
-}
-
-void gfx__gfx_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
-  int32_t dx = __mp_gfx_abs((x1 - x0));
-  int32_t dy = __mp_gfx_abs((y1 - y0));
-  int32_t sx = __mp_gfx_sign((x1 - x0));
-  int32_t sy = __mp_gfx_sign((y1 - y0));
-  int32_t err = (dx - dy);
-  while (true) {
-    if (((((x0 >= 0) && (x0 < gfx___view_w)) && (y0 >= 0)) && (y0 < gfx___view_h))) {
-      gfx___pixel_fn(x0, y0, color);
-    }
-    if (((x0 == x1) && (y0 == y1))) {
-      (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-      return;
-    }
-    int32_t e2 = (err * 2);
-    if ((e2 > (-dy))) {
-      (err -= dy);
-      (x0 += sx);
-    }
-    if ((e2 < dx)) {
-      (err += dx);
-      (y0 += sy);
-    }
+  if (this->_dirty_render) {
+    (this->_render_window.x = 0);
+    (this->_render_window.y = 0);
+    (this->_render_window.width = 0);
+    (this->_render_window.height = 0);
   }
 }
 
-void gfx__gfx_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___fill_fn(x, y, w, 1, color);
-  gfx___fill_fn(x, ((y + h) - 1), w, 1, color);
-  gfx___fill_fn(x, (y + 1), 1, (h - 2), color);
-  gfx___fill_fn(((x + w) - 1), (y + 1), 1, (h - 2), color);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
+static __Slice_uint8_t Graphics__front_strip(Graphics* this) {
+  if ((this->_single_buffer || (this->_front_buffer == 0))) {
+    return this->_strip0;
+  }
+  return this->_strip1;
 }
 
-void gfx__gfx_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  gfx___fill_fn(x, y, w, h, color);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
+static __Slice_uint8_t Graphics__back_strip(Graphics* this) {
+  if ((this->_single_buffer || (this->_front_buffer == 1))) {
+    return this->_strip0;
+  }
+  return this->_strip1;
 }
 
-void gfx__gfx_clear(int32_t color) {
-  gfx___fill_fn(0, 0, gfx___view_w, gfx___view_h, color);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-static void gfx___circle_8(int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color) {
-  gfx__gfx_pixel((cx + x), (cy + y), color);
-  gfx__gfx_pixel((cx - x), (cy + y), color);
-  gfx__gfx_pixel((cx + x), (cy - y), color);
-  gfx__gfx_pixel((cx - x), (cy - y), color);
-  gfx__gfx_pixel((cx + y), (cy + x), color);
-  gfx__gfx_pixel((cx - y), (cy + x), color);
-  gfx__gfx_pixel((cx + y), (cy - x), color);
-  gfx__gfx_pixel((cx - y), (cy - x), color);
-}
-
-void gfx__gfx_circle(int32_t cx, int32_t cy, int32_t r, int32_t color) {
-  int32_t x = 0;
-  int32_t y = r;
-  int32_t d = (1 - r);
-  gfx___circle_8(cx, cy, x, y, color);
-  while ((x < y)) {
-    if ((d < 0)) {
-      (d += ((2 * x) + 3));
+static void Graphics__clear_strip(Graphics* this, __Slice_uint8_t buffer) {
+  if ((this->_context.format == PixelFormat_Mono)) {
+    if ((this->_background == 0)) {
+      memory__memory_zero(buffer, buffer.size);
     } else {
-      (d += ((2 * (x - y)) + 5));
-      (y -= 1);
+      memset(buffer, 0xFF, buffer.size);
     }
-    (x += 1);
-    gfx___circle_8(cx, cy, x, y, color);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-void gfx__gfx_fill_circle(int32_t cx, int32_t cy, int32_t r, int32_t color) {
-  int32_t dy = (-r);
-  while ((dy <= r)) {
-    int32_t dx = __mp_gfx_isqrt(((r * r) - (dy * dy)));
-    gfx___fill_fn((cx - dx), (cy + dy), ((dx * 2) + 1), 1, color);
-    (dy += 1);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-static void gfx___line_raw(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
-  int32_t dx = __mp_gfx_abs((x1 - x0));
-  int32_t dy = __mp_gfx_abs((y1 - y0));
-  int32_t sx = __mp_gfx_sign((x1 - x0));
-  int32_t sy = __mp_gfx_sign((y1 - y0));
-  int32_t err = (dx - dy);
-  while (true) {
-    if (((((x0 >= 0) && (x0 < gfx___view_w)) && (y0 >= 0)) && (y0 < gfx___view_h))) {
-      gfx___pixel_fn(x0, y0, color);
-    }
-    if (((x0 == x1) && (y0 == y1))) {
-      return;
-    }
-    int32_t e2 = (err * 2);
-    if ((e2 > (-dy))) {
-      (err -= dy);
-      (x0 += sx);
-    }
-    if ((e2 < dx)) {
-      (err += dx);
-      (y0 += sy);
-    }
-  }
-}
-
-void gfx__gfx_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
-  gfx___line_raw(x0, y0, x1, y1, color);
-  gfx___line_raw(x1, y1, x2, y2, color);
-  gfx___line_raw(x2, y2, x0, y0, color);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-void gfx__gfx_fill_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
-  int32_t tx = 0;
-  int32_t ty = 0;
-  if ((y1 < y0)) {
-    (tx = x0);
-    (ty = y0);
-    (x0 = x1);
-    (y0 = y1);
-    (x1 = tx);
-    (y1 = ty);
-  }
-  if ((y2 < y0)) {
-    (tx = x0);
-    (ty = y0);
-    (x0 = x2);
-    (y0 = y2);
-    (x2 = tx);
-    (y2 = ty);
-  }
-  if ((y2 < y1)) {
-    (tx = x1);
-    (ty = y1);
-    (x1 = x2);
-    (y1 = y2);
-    (x2 = tx);
-    (y2 = ty);
-  }
-  int32_t y = y0;
-  while ((y <= y2)) {
-    int32_t xa = 0;
-    int32_t xb = 0;
-    if (((y <= y1) && (y1 != y0))) {
-      (xa = (x0 + (((y - y0) * (x1 - x0)) / (y1 - y0))));
+  } else {
+    if ((this->_background == 0)) {
+      memory__memory_zero(buffer, buffer.size);
     } else {
-      (xa = x1);
-    }
-    if ((y2 != y0)) {
-      (xb = (x0 + (((y - y0) * (x2 - x0)) / (y2 - y0))));
-    } else {
-      (xb = x0);
-    }
-    if ((xa > xb)) {
-      (tx = xa);
-      (xa = xb);
-      (xb = tx);
-    }
-    gfx___fill_fn(xa, y, ((xb - xa) + 1), 1, color);
-    (y += 1);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-void gfx__gfx_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
-  gfx___fill_fn((x + r), y, (w - (2 * r)), 1, color);
-  gfx___fill_fn((x + r), ((y + h) - 1), (w - (2 * r)), 1, color);
-  gfx___fill_fn(x, (y + r), 1, (h - (2 * r)), color);
-  gfx___fill_fn(((x + w) - 1), (y + r), 1, (h - (2 * r)), color);
-  int32_t px = 0;
-  int32_t py = r;
-  int32_t d = (1 - r);
-  while ((px <= py)) {
-    gfx___pixel_fn(((((x + w) - 1) - r) + py), ((y + r) - px), color);
-    gfx___pixel_fn(((x + r) - py), ((y + r) - px), color);
-    gfx___pixel_fn(((((x + w) - 1) - r) + py), ((((y + h) - 1) - r) + px), color);
-    gfx___pixel_fn(((x + r) - py), ((((y + h) - 1) - r) + px), color);
-    gfx___pixel_fn(((((x + w) - 1) - r) + px), ((y + r) - py), color);
-    gfx___pixel_fn(((x + r) - px), ((y + r) - py), color);
-    gfx___pixel_fn(((((x + w) - 1) - r) + px), ((((y + h) - 1) - r) + py), color);
-    gfx___pixel_fn(((x + r) - px), ((((y + h) - 1) - r) + py), color);
-    if ((d < 0)) {
-      (d += ((2 * px) + 3));
-    } else {
-      (d += ((2 * (px - py)) + 5));
-      (py -= 1);
-    }
-    (px += 1);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-void gfx__gfx_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
-  gfx___fill_fn((x + r), y, (w - (2 * r)), h, color);
-  int32_t px = 0;
-  int32_t py = r;
-  int32_t d = (1 - r);
-  while ((px <= py)) {
-    gfx___fill_fn((((((x + w) - 1) - r) - py) + 1), ((y + r) - px), ((py * 2) - 1), 1, color);
-    gfx___fill_fn((((((x + w) - 1) - r) - py) + 1), ((((y + h) - 1) - r) + px), ((py * 2) - 1), 1, color);
-    gfx___fill_fn((((((x + w) - 1) - r) - px) + 1), ((y + r) - py), ((px * 2) - 1), 1, color);
-    gfx___fill_fn((((((x + w) - 1) - r) - px) + 1), ((((y + h) - 1) - r) + py), ((px * 2) - 1), 1, color);
-    if ((d < 0)) {
-      (d += ((2 * px) + 3));
-    } else {
-      (d += ((2 * (px - py)) + 5));
-      (py -= 1);
-    }
-    (px += 1);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-static void gfx___char_raw(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale) {
-  int32_t row = 0;
-  while ((row < 8)) {
-    uint8_t bits = __mp_gfx_font_row(c, row);
-    int32_t col = 0;
-    while ((col < 8)) {
-      if (((bits & ((uint8_t)((0x80 >> col)))) != 0)) {
-        gfx___fill_fn((x + (col * scale)), (y + (row * scale)), scale, scale, color);
-      } else {
-        if ((bg >= 0)) {
-          gfx___fill_fn((x + (col * scale)), (y + (row * scale)), scale, scale, bg);
-        }
+      int32_t i = 0;
+      int32_t size = buffer.size;
+      while ((i < size)) {
+        (buffer.ptr[i] = ((uint8_t)((this->_background >> 8))));
+        (buffer.ptr[(i + 1)] = ((uint8_t)(this->_background)));
+        (i += 2);
       }
-      (col += 1);
-    }
-    (row += 1);
-  }
-}
-
-void gfx__gfx_char(int32_t x, int32_t y, uint8_t c, int32_t color, int32_t bg, int32_t scale) {
-  gfx___char_raw(x, y, c, color, bg, scale);
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-}
-
-int32_t gfx__gfx_str(int32_t x, int32_t y, __Slice_uint8_t s, int32_t color, int32_t bg, int32_t scale) {
-  int32_t i = 0;
-  int32_t cx = x;
-  while ((i < ((int32_t)(s.size)))) {
-    gfx___char_raw(cx, y, s.ptr[i], color, bg, scale);
-    (cx += (9 * scale));
-    (i += 1);
-  }
-  (&gfx___driver)->flush(0, 0, gfx___driver.width, gfx___driver.height, gfx___strip);
-  return cx;
-}
-
-void gfx__gfx_render(Node* node, int32_t bias_x, int32_t bias_y) {
-  switch ((node)->tag) {
-    case Node_Canvas: {
-      Canvas c = (node)->data.Canvas.canvas;
-      (&gfx___driver)->flush((c.x + bias_x), (c.y + bias_y), c.width, c.height, c.buf);
-      break;
     }
   }
 }
 
-static inline int32_t math__floor_fixed(int32_t v) {
-  return (v & (-65536));
+static inline void Point_copy(Point* this, Point* point) {
+  (this->x = point->x);
+  (this->y = point->y);
 }
 
-static inline int32_t math__ceil_fixed(int32_t v) {
-  int32_t f = (v & (-65536));
-  if ((v != f)) {
-    return (f + 65536);
-  }
-  return f;
+static inline void Rect_copy(Rect* this, Rect* rect) {
+  (this->x = rect->x);
+  (this->y = rect->y);
+  (this->width = rect->width);
+  (this->height = rect->height);
 }
 
-static inline int32_t math__round_fixed(int32_t v) {
-  return ((v + 32768) & (-65536));
+static inline bool Rect_intersect(Rect* this, Rect* rect) {
+  return ((((rect->x < (this->x + this->width)) && ((rect->x + rect->width) > this->x)) && (rect->y < (this->y + this->height))) && ((rect->y + rect->height) > this->y));
 }
 
-DisplayConn* display__display_conn(void) {
-  return (&display___conn);
+static inline bool Rect_contains(Rect* this, Point* point) {
+  return ((((point->x >= this->x) && (point->x < (this->x + this->width))) && (point->y >= this->y)) && (point->y < (this->y + this->height)));
 }
 
-DisplayInfo* display__display_info(void) {
-  return (&display___info);
+static inline void Rect_merge(Rect* this, Rect* rect) {
+  int32_t right = math__max_int32_t((this->x + this->width), (rect->x + rect->width));
+  int32_t bottom = math__max_int32_t((this->y + this->height), (rect->y + rect->height));
+  (this->x = math__min_int32_t(this->x, rect->x));
+  (this->y = math__min_int32_t(this->y, rect->y));
+  (this->width = (right - this->x));
+  (this->height = (bottom - this->y));
 }
 
-static int32_t drivers__ssd1306_128x32___cmd1(int32_t dev, int32_t c) {
+static int32_t drivers__ssd1306___cmd1(int32_t dev, int32_t c) {
   uint8_t buf[2];
   (buf[0] = 0x00);
   (buf[1] = ((uint8_t)(c)));
   return i2c__i2c_write(dev, (__Slice_uint8_t){buf, 2}, 2);
 }
 
-static int32_t drivers__ssd1306_128x32___cmd2(int32_t dev, int32_t c, int32_t v) {
+static int32_t drivers__ssd1306___cmd2(int32_t dev, int32_t c, int32_t v) {
   uint8_t buf[3];
   (buf[0] = 0x00);
   (buf[1] = ((uint8_t)(c)));
@@ -1153,166 +578,235 @@ static int32_t drivers__ssd1306_128x32___cmd2(int32_t dev, int32_t c, int32_t v)
   return i2c__i2c_write(dev, (__Slice_uint8_t){buf, 3}, 3);
 }
 
-static void drivers__ssd1306_128x32___hw_init(int32_t dev) {
-  drivers__ssd1306_128x32___cmd1(dev, 0xAE);
-  drivers__ssd1306_128x32___cmd2(dev, 0xD5, 0x80);
-  drivers__ssd1306_128x32___cmd2(dev, 0xA8, 0x1F);
-  drivers__ssd1306_128x32___cmd2(dev, 0xD3, 0x00);
-  drivers__ssd1306_128x32___cmd1(dev, 0x40);
-  drivers__ssd1306_128x32___cmd2(dev, 0x8D, 0x14);
-  drivers__ssd1306_128x32___cmd2(dev, 0x20, 0x00);
-  drivers__ssd1306_128x32___cmd1(dev, 0xA1);
-  drivers__ssd1306_128x32___cmd1(dev, 0xC8);
-  drivers__ssd1306_128x32___cmd2(dev, 0xDA, 0x02);
-  drivers__ssd1306_128x32___cmd2(dev, 0x81, 0xCF);
-  drivers__ssd1306_128x32___cmd2(dev, 0xD9, 0xF1);
-  drivers__ssd1306_128x32___cmd2(dev, 0xDB, 0x40);
-  drivers__ssd1306_128x32___cmd1(dev, 0xA4);
-  drivers__ssd1306_128x32___cmd1(dev, 0xA6);
-  drivers__ssd1306_128x32___cmd1(dev, 0xAF);
+static void drivers__ssd1306___hw_init_128x32(int32_t dev) {
+  drivers__ssd1306___cmd1(dev, 0xAE);
+  drivers__ssd1306___cmd2(dev, 0xD5, 0x80);
+  drivers__ssd1306___cmd2(dev, 0xA8, 0x1F);
+  drivers__ssd1306___cmd2(dev, 0xD3, 0x00);
+  drivers__ssd1306___cmd1(dev, 0x40);
+  drivers__ssd1306___cmd2(dev, 0x8D, 0x14);
+  drivers__ssd1306___cmd2(dev, 0x20, 0x00);
+  drivers__ssd1306___cmd1(dev, 0xA1);
+  drivers__ssd1306___cmd1(dev, 0xC8);
+  drivers__ssd1306___cmd2(dev, 0xDA, 0x02);
+  drivers__ssd1306___cmd2(dev, 0x81, 0xCF);
+  drivers__ssd1306___cmd2(dev, 0xD9, 0xF1);
+  drivers__ssd1306___cmd2(dev, 0xDB, 0x40);
+  drivers__ssd1306___cmd1(dev, 0xA4);
+  drivers__ssd1306___cmd1(dev, 0xA6);
+  drivers__ssd1306___cmd1(dev, 0xAF);
 }
 
-static void drivers__ssd1306_128x32___send_page(int32_t dev) {
+static void drivers__ssd1306___hw_init_128x64(int32_t dev) {
+  drivers__ssd1306___cmd1(dev, 0xAE);
+  drivers__ssd1306___cmd2(dev, 0xD5, 0x80);
+  drivers__ssd1306___cmd2(dev, 0xA8, 0x3F);
+  drivers__ssd1306___cmd2(dev, 0xD3, 0x00);
+  drivers__ssd1306___cmd1(dev, 0x40);
+  drivers__ssd1306___cmd2(dev, 0x8D, 0x14);
+  drivers__ssd1306___cmd2(dev, 0x20, 0x00);
+  drivers__ssd1306___cmd1(dev, 0xA1);
+  drivers__ssd1306___cmd1(dev, 0xC8);
+  drivers__ssd1306___cmd2(dev, 0xDA, 0x12);
+  drivers__ssd1306___cmd2(dev, 0x81, 0xCF);
+  drivers__ssd1306___cmd2(dev, 0xD9, 0xF1);
+  drivers__ssd1306___cmd2(dev, 0xDB, 0x40);
+  drivers__ssd1306___cmd1(dev, 0xA4);
+  drivers__ssd1306___cmd1(dev, 0xA6);
+  drivers__ssd1306___cmd1(dev, 0xAF);
+}
+
+static void drivers__ssd1306___attach(Ssd1306* d, DisplayConn* conn, int32_t w, int32_t h) {
+  Allocator alloc;
+  alloc.init(d->heap);
+  (d->_dev = conn->device);
+  (d->_width = w);
+  (d->_height = h);
+  int32_t pages = (h >> 3);
+  int32_t buf_size = (1 + (pages * w));
+  (d->_page_buf = alloc.allocate_array(buf_size));
+  (d->_page_buf.ptr[0] = 0x40);
+  if ((conn->reset_pin >= 0)) {
+    gpio__gpio_mode(conn->reset_pin, GpioMode_OUTPUT);
+    gpio__gpio_write(conn->reset_pin, GpioLevel_LOW);
+    gpio__gpio_write(conn->reset_pin, GpioLevel_HIGH);
+  }
+  (d->driver.width = w);
+  (d->driver.height = h);
+  (d->driver.set_rotation = d->_set_rotation);
+  (d->driver.wait = d->_wait);
+  (d->driver.flush = d->_flush);
+}
+
+Ssd1306* drivers__ssd1306__attach_ssd1306_128x32(Ssd1306* d, DisplayConn* conn) {
+  drivers__ssd1306___attach(d, conn, 128, 32);
+  drivers__ssd1306___hw_init_128x32(conn->device);
+  return d;
+}
+
+Ssd1306* drivers__ssd1306__attach_ssd1306_128x64(Ssd1306* d, DisplayConn* conn) {
+  drivers__ssd1306___attach(d, conn, 128, 64);
+  drivers__ssd1306___hw_init_128x64(conn->device);
+  return d;
+}
+
+static void Ssd1306__set_rotation(Ssd1306* this, Rotation r) {
+}
+
+static void Ssd1306__wait(Ssd1306* this) {
+}
+
+static void Ssd1306__blit(Ssd1306* this, Rect* rect, __Slice_uint8_t src) {
+  int32_t stride = ((rect->width + 7) / 8);
+  for (int32_t ry = 0; ry < rect->height; ry++) {
+    int32_t abs_y = (rect->y + ry);
+    if (((abs_y >= 0) && (abs_y < this->_height))) {
+      int32_t page = (abs_y >> 3);
+      int32_t bit = (abs_y & 7);
+      int32_t row = (ry * stride);
+      for (int32_t rx = 0; rx < rect->width; rx++) {
+        int32_t abs_x = (rect->x + rx);
+        if (((abs_x >= 0) && (abs_x < this->_width))) {
+          int32_t pixel = ((((int32_t)(src.ptr[(row + (rx >> 3))])) >> (7 - (rx & 7))) & 1);
+          int32_t p = ((1 + (page * this->_width)) + abs_x);
+          if ((pixel != 0)) {
+            (this->_page_buf.ptr[p] = (this->_page_buf.ptr[p] | ((uint8_t)((1 << bit)))));
+          } else {
+            (this->_page_buf.ptr[p] = (this->_page_buf.ptr[p] & ((uint8_t)((~(1 << bit))))));
+          }
+        }
+      }
+    }
+  }
+}
+
+static void Ssd1306__flush(Ssd1306* this, Rect* rect, __Slice_uint8_t buf) {
+  Ssd1306__blit(this, rect, buf);
+  Ssd1306__send_page(this);
+}
+
+static void Ssd1306__send_page(Ssd1306* this) {
+  int32_t pages = (this->_height >> 3);
   uint8_t col[4];
   (col[0] = 0x00);
   (col[1] = 0x21);
   (col[2] = 0x00);
-  (col[3] = 0x7F);
-  i2c__i2c_write(dev, (__Slice_uint8_t){col, 4}, 4);
+  (col[3] = ((uint8_t)((this->_width - 1))));
+  i2c__i2c_write(this->_dev, (__Slice_uint8_t){col, 4}, 4);
   uint8_t page[4];
   (page[0] = 0x00);
   (page[1] = 0x22);
   (page[2] = 0x00);
-  (page[3] = 0x03);
-  i2c__i2c_write(dev, (__Slice_uint8_t){page, 4}, 4);
-  __Slice_uint8_t pg = __mp_ssd1306_32_page_slice();
-  i2c__i2c_write(dev, pg, 513);
+  (page[3] = ((uint8_t)((pages - 1))));
+  i2c__i2c_write(this->_dev, (__Slice_uint8_t){page, 4}, 4);
+  i2c__i2c_write(this->_dev, this->_page_buf, (1 + (pages * this->_width)));
 }
 
-static void drivers__ssd1306_128x32___gfx_flush(int32_t x, int32_t y, int32_t w, int32_t h, __Slice_uint8_t buf) {
-  __mp_ssd1306_32_blit(x, y, w, h, buf);
-  drivers__ssd1306_128x32___send_page(display___conn.device);
+Canvas* node__canvas__create_canvas(Allocator* allocator, Rect* rect, uint16_t background, IndexFormat index_format, __Slice_uint16_t palette) {
+  Canvas* canvas = (Canvas*)Allocator_allocate(allocator, sizeof(Canvas));
+  Rect_copy((&canvas->_viewpoint), rect);
+  (canvas->_background = background);
+  (canvas->_index_format = index_format);
+  (canvas->_palette = palette);
+  if ((index_format == IndexFormat_Index1)) {
+    (canvas->_set_pixel_fn = canvas->_set_pixel_index1);
+    (canvas->_render_fn = canvas->_render_index1);
+    int32_t buffer_size = (((rect->width + 7) / 8) * rect->height);
+    (canvas->_buffer = (uint8_t*)Allocator_allocate_array(allocator, buffer_size, sizeof(uint8_t)));
+  }
+  if ((index_format == IndexFormat_Index2)) {
+    (canvas->_set_pixel_fn = canvas->_set_pixel_index2);
+    (canvas->_render_fn = canvas->_render_index2);
+    int32_t buffer_size = (((rect->width + 3) / 4) * rect->height);
+    (canvas->_buffer = (uint8_t*)Allocator_allocate_array(allocator, buffer_size, sizeof(uint8_t)));
+  }
+  if ((index_format == IndexFormat_Index4)) {
+    (canvas->_set_pixel_fn = canvas->_set_pixel_index4);
+    (canvas->_render_fn = canvas->_render_index4);
+    int32_t buffer_size = (((rect->width + 1) / 2) * rect->height);
+    (canvas->_buffer = (uint8_t*)Allocator_allocate_array(allocator, buffer_size, sizeof(uint8_t)));
+  }
+  if ((index_format == IndexFormat_Index8)) {
+    (canvas->_set_pixel_fn = canvas->_set_pixel_index8);
+    (canvas->_render_fn = canvas->_render_index8);
+    int32_t buffer_size = (rect->width * rect->height);
+    (canvas->_buffer = (uint8_t*)Allocator_allocate_array(allocator, buffer_size, sizeof(uint8_t)));
+  }
+  (canvas->_node.handle = ((void*)(canvas)));
+  (canvas->_node.renderer = node__canvas__render_canvas);
 }
 
-void drivers__ssd1306_128x32__display_attach_gfx(GfxDriver* driver) {
-  DisplayInfo* info = display__display_info();
-  (info->width = 128);
-  (info->height = 32);
-  (info->color = DisplayColor_MONO);
-  if ((display___conn.reset_pin >= 0)) {
-    gpio__gpio_mode(display___conn.reset_pin, GpioMode_OUTPUT);
-    gpio__gpio_write(display___conn.reset_pin, GpioLevel_LOW);
-    gpio__gpio_write(display___conn.reset_pin, GpioLevel_HIGH);
-  }
-  drivers__ssd1306_128x32___hw_init(display___conn.device);
-  __Slice_uint8_t pg = __mp_ssd1306_32_page_slice();
-  (pg.ptr[0] = 0x40);
-  (driver->width = 128);
-  (driver->height = 32);
-  (driver->flush = drivers__ssd1306_128x32___gfx_flush);
-}
-
-void gpio__gpio_mode(int32_t pin, GpioMode mode) {
-  gpio_reset_pin(pin);
-  if ((mode == GpioMode_INPUT_PULLUP)) {
-    gpio_set_direction(pin, ((int32_t)(GpioMode_INPUT)));
-    gpio_set_pull_mode(pin, 0);
-  } else if ((mode == GpioMode_INPUT_PULLDOWN)) {
-    gpio_set_direction(pin, ((int32_t)(GpioMode_INPUT)));
-    gpio_set_pull_mode(pin, 1);
-  } else {
-    gpio_set_direction(pin, ((int32_t)(mode)));
-  }
-}
-
-static inline void gpio__gpio_write(int32_t pin, GpioLevel value) {
-  gpio_set_level(pin, ((int32_t)(value)));
-}
-
-static inline GpioLevel gpio__gpio_read(int32_t pin) {
-  return ((GpioLevel)(gpio_get_level(pin)));
-}
-
-void Canvas_set_format(Canvas* this, PixelFormat fmt) {
-  (this->format = fmt);
-  if ((fmt == PixelFormat_RGB565)) {
-    (this->_set_pixel_fn = _set_pixel_rgb565);
-  }
-  if ((fmt == PixelFormat_Mono)) {
-    (this->_set_pixel_fn = _set_pixel_mono);
-  }
-  if ((fmt == PixelFormat_Index1)) {
-    (this->_set_pixel_fn = _set_pixel_index1);
-  }
-  if ((fmt == PixelFormat_Index2)) {
-    (this->_set_pixel_fn = _set_pixel_index2);
-  }
-  if ((fmt == PixelFormat_Index4)) {
-    (this->_set_pixel_fn = _set_pixel_index4);
-  }
-  if ((fmt == PixelFormat_Index8)) {
-    (this->_set_pixel_fn = _set_pixel_index8);
-  }
-}
-
-void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  if (((((x < 0) || (x >= this->width)) || (y < 0)) || (y >= this->height))) {
+void node__canvas__render_canvas(RenderContext* context, Point* offset, void* handle) {
+  Canvas* canvas = ((Canvas*)(handle));
+  Rect viewpoint = {0};
+  (viewpoint.x = (canvas->_viewpoint.x + offset->x));
+  (viewpoint.y = (canvas->_viewpoint.y + offset->y));
+  (viewpoint.width = canvas->_viewpoint.width);
+  (viewpoint.height = canvas->_viewpoint.height);
+  if ((!RenderContext_intersect(context, viewpoint))) {
     return;
   }
-  Canvas__set_pixel(this, x, y, color);
+  (viewpoint.x = math__max_int32_t(viewpoint.x, context->viewpoint.x));
+  (viewpoint.y = math__max_int32_t(viewpoint.y, context->viewpoint.y));
+  (viewpoint.width = (math__min_int32_t((viewpoint.x + viewpoint.width), (context->viewpoint.x + context->viewpoint.width)) - viewpoint.x));
+  (viewpoint.height = (math__min_int32_t((viewpoint.y + viewpoint.height), (context->viewpoint.y + context->viewpoint.height)) - viewpoint.y));
+  canvas->_render_fn(context, (&viewpoint), offset);
 }
 
-void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t color) {
-  if ((((w <= 0) || (y < 0)) || (y >= this->height))) {
-    return;
-  }
-  if ((x < 0)) {
-    (w += x);
-    (x = 0);
-  }
-  if (((x + w) > this->width)) {
-    (w = (this->width - x));
-  }
-  if ((w <= 0)) {
-    return;
-  }
-  Canvas__fill_rect(this, x, y, w, 1, color);
+Node* Canvas_get_node(Canvas* this) {
+  return (&this->_node);
 }
 
-void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t h, int32_t color) {
-  if ((((h <= 0) || (x < 0)) || (x >= this->width))) {
-    return;
-  }
-  if ((y < 0)) {
-    (h += y);
-    (y = 0);
-  }
-  if (((y + h) > this->height)) {
-    (h = (this->height - y));
-  }
-  if ((h <= 0)) {
-    return;
-  }
-  Canvas__fill_rect(this, x, y, 1, h, color);
+static inline void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color) {
+  this->_set_pixel_fn(x, y, color);
+}
+
+static inline void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t color) {
+  Canvas__fill_rect(this, x, y, width, 1, color);
+}
+
+static inline void Canvas_draw_vline(Canvas* this, int32_t x, int32_t y, int32_t height, int32_t color) {
+  Canvas__fill_rect(this, x, y, 1, height, color);
 }
 
 void Canvas_draw_line(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
-  Canvas__line_raw(this, x0, y0, x1, y1, color);
+  int32_t dx = Canvas__abs(this, (x1 - x0));
+  int32_t dy = Canvas__abs(this, (y1 - y0));
+  int32_t sx = Canvas__sign(this, (x1 - x0));
+  int32_t sy = Canvas__sign(this, (y1 - y0));
+  int32_t err = (dx - dy);
+  int32_t cx = x0;
+  int32_t cy = y0;
+  while (true) {
+    Canvas_draw_pixel(this, cx, cy, color);
+    if (((cx == x1) && (cy == y1))) {
+      return;
+    }
+    int32_t e2 = (err * 2);
+    if ((e2 > (-dy))) {
+      (err -= dy);
+      (cx += sx);
+    }
+    if ((e2 < dx)) {
+      (err += dx);
+      (cy += sy);
+    }
+  }
 }
 
-void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  Canvas__fill_rect(this, x, y, w, 1, color);
-  Canvas__fill_rect(this, x, ((y + h) - 1), w, 1, color);
-  Canvas__fill_rect(this, x, (y + 1), 1, (h - 2), color);
-  Canvas__fill_rect(this, ((x + w) - 1), (y + 1), 1, (h - 2), color);
+void Canvas_draw_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color) {
+  Canvas__fill_rect(this, x, y, width, 1, color);
+  Canvas__fill_rect(this, x, ((y + height) - 1), width, 1, color);
+  Canvas__fill_rect(this, x, (y + 1), 1, (height - 2), color);
+  Canvas__fill_rect(this, ((x + width) - 1), (y + 1), 1, (height - 2), color);
 }
 
-void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  Canvas__fill_rect(this, x, y, w, h, color);
+static inline void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color) {
+  Canvas__fill_rect(this, x, y, width, height, color);
 }
 
-void Canvas_clear(Canvas* this, int32_t color) {
-  Canvas__fill_rect(this, 0, 0, this->width, this->height, color);
+void Canvas_clear(Canvas* this) {
+  Canvas__fill_rect(this, this->_viewpoint.x, this->_viewpoint.y, this->_viewpoint.width, this->_viewpoint.height, this->_background);
 }
 
 void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color) {
@@ -1333,18 +827,16 @@ void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t
 }
 
 void Canvas_fill_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color) {
-  int32_t dy = (-r);
-  while ((dy <= r)) {
-    int32_t dx = __mp_gfx_isqrt(((r * r) - (dy * dy)));
+  for (int32_t dy = (-r); dy < (r + 1); dy++) {
+    int32_t dx = Canvas__sqrt(this, ((r * r) - (dy * dy)));
     Canvas__fill_rect(this, (cx - dx), (cy + dy), ((dx * 2) + 1), 1, color);
-    (dy += 1);
   }
 }
 
 void Canvas_draw_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
-  Canvas__line_raw(this, x0, y0, x1, y1, color);
-  Canvas__line_raw(this, x1, y1, x2, y2, color);
-  Canvas__line_raw(this, x2, y2, x0, y0, color);
+  Canvas_draw_line(this, x0, y0, x1, y1, color);
+  Canvas_draw_line(this, x1, y1, x2, y2, color);
+  Canvas_draw_line(this, x2, y2, x0, y0, color);
 }
 
 void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color) {
@@ -1374,8 +866,7 @@ void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int3
     (x2 = tx);
     (y2 = ty);
   }
-  int32_t y = y0;
-  while ((y <= y2)) {
+  for (int32_t y = y0; y < (y2 + 1); y++) {
     int32_t xa = 0;
     int32_t xb = 0;
     if (((y <= y1) && (y1 != y0))) {
@@ -1394,27 +885,26 @@ void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int3
       (xb = tx);
     }
     Canvas__fill_rect(this, xa, y, ((xb - xa) + 1), 1, color);
-    (y += 1);
   }
 }
 
-void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
-  Canvas__fill_rect(this, (x + r), y, (w - (2 * r)), 1, color);
-  Canvas__fill_rect(this, (x + r), ((y + h) - 1), (w - (2 * r)), 1, color);
-  Canvas__fill_rect(this, x, (y + r), 1, (h - (2 * r)), color);
-  Canvas__fill_rect(this, ((x + w) - 1), (y + r), 1, (h - (2 * r)), color);
+void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color) {
+  Canvas__fill_rect(this, (x + r), y, (width - (2 * r)), 1, color);
+  Canvas__fill_rect(this, (x + r), ((y + height) - 1), (width - (2 * r)), 1, color);
+  Canvas__fill_rect(this, x, (y + r), 1, (height - (2 * r)), color);
+  Canvas__fill_rect(this, ((x + width) - 1), (y + r), 1, (height - (2 * r)), color);
   int32_t px = 0;
   int32_t py = r;
   int32_t d = (1 - r);
   while ((px <= py)) {
-    Canvas__set_pixel(this, ((((x + w) - 1) - r) + py), ((y + r) - px), color);
-    Canvas__set_pixel(this, ((x + r) - py), ((y + r) - px), color);
-    Canvas__set_pixel(this, ((((x + w) - 1) - r) + py), ((((y + h) - 1) - r) + px), color);
-    Canvas__set_pixel(this, ((x + r) - py), ((((y + h) - 1) - r) + px), color);
-    Canvas__set_pixel(this, ((((x + w) - 1) - r) + px), ((y + r) - py), color);
-    Canvas__set_pixel(this, ((x + r) - px), ((y + r) - py), color);
-    Canvas__set_pixel(this, ((((x + w) - 1) - r) + px), ((((y + h) - 1) - r) + py), color);
-    Canvas__set_pixel(this, ((x + r) - px), ((((y + h) - 1) - r) + py), color);
+    Canvas_draw_pixel(this, ((((x + width) - 1) - r) + py), ((y + r) - px), color);
+    Canvas_draw_pixel(this, ((x + r) - py), ((y + r) - px), color);
+    Canvas_draw_pixel(this, ((((x + width) - 1) - r) + py), ((((y + height) - 1) - r) + px), color);
+    Canvas_draw_pixel(this, ((x + r) - py), ((((y + height) - 1) - r) + px), color);
+    Canvas_draw_pixel(this, ((((x + width) - 1) - r) + px), ((y + r) - py), color);
+    Canvas_draw_pixel(this, ((x + r) - px), ((y + r) - py), color);
+    Canvas_draw_pixel(this, ((((x + width) - 1) - r) + px), ((((y + height) - 1) - r) + py), color);
+    Canvas_draw_pixel(this, ((x + r) - px), ((((y + height) - 1) - r) + py), color);
     if ((d < 0)) {
       (d += ((2 * px) + 3));
     } else {
@@ -1425,16 +915,16 @@ void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32
   }
 }
 
-void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, int32_t color) {
-  Canvas__fill_rect(this, (x + r), y, (w - (2 * r)), h, color);
+void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color) {
+  Canvas__fill_rect(this, (x + r), y, (width - (2 * r)), height, color);
   int32_t px = 0;
   int32_t py = r;
   int32_t d = (1 - r);
   while ((px <= py)) {
-    Canvas__fill_rect(this, (((((x + w) - 1) - r) - py) + 1), ((y + r) - px), ((py * 2) - 1), 1, color);
-    Canvas__fill_rect(this, (((((x + w) - 1) - r) - py) + 1), ((((y + h) - 1) - r) + px), ((py * 2) - 1), 1, color);
-    Canvas__fill_rect(this, (((((x + w) - 1) - r) - px) + 1), ((y + r) - py), ((px * 2) - 1), 1, color);
-    Canvas__fill_rect(this, (((((x + w) - 1) - r) - px) + 1), ((((y + h) - 1) - r) + py), ((px * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + width) - 1) - r) - py) + 1), ((y + r) - px), ((py * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + width) - 1) - r) - py) + 1), ((((y + height) - 1) - r) + px), ((py * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + width) - 1) - r) - px) + 1), ((y + r) - py), ((px * 2) - 1), 1, color);
+    Canvas__fill_rect(this, (((((x + width) - 1) - r) - px) + 1), ((((y + height) - 1) - r) + py), ((px * 2) - 1), 1, color);
     if ((d < 0)) {
       (d += ((2 * px) + 3));
     } else {
@@ -1445,19 +935,22 @@ void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32
   }
 }
 
-static void Canvas__set_pixel(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  this->_set_pixel_fn(x, y, color);
-}
-
-static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t w, int32_t h, int32_t color) {
-  int32_t iy = y;
-  while ((iy < (y + h))) {
-    int32_t ix = x;
-    while ((ix < (x + w))) {
-      Canvas__set_pixel(this, ix, iy, color);
-      (ix += 1);
+static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color) {
+  if (((width <= 0) || (height <= 0))) {
+    return;
+  }
+  bool intersect = ((((x < (this->_viewpoint.x + this->_viewpoint.width)) && ((x + width) > this->_viewpoint.x)) && (y < (this->_viewpoint.y + this->_viewpoint.height))) && ((y + height) > this->_viewpoint.y));
+  if ((!intersect)) {
+    return;
+  }
+  int32_t start_x = math__max_int32_t(x, this->_viewpoint.x);
+  int32_t start_y = math__max_int32_t(y, this->_viewpoint.y);
+  int32_t end_x = math__min_int32_t((x + width), (this->_viewpoint.x + this->_viewpoint.width));
+  int32_t end_y = math__min_int32_t((y + height), (this->_viewpoint.y + this->_viewpoint.height));
+  for (int32_t py = start_y; py < end_y; py++) {
+    for (int32_t px = start_x; px < end_x; px++) {
+      Canvas_draw_pixel(this, px, py, color);
     }
-    (iy += 1);
   }
 }
 
@@ -1472,74 +965,119 @@ static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, in
   Canvas_draw_pixel(this, (cx - y), (cy - x), color);
 }
 
-static void Canvas__line_raw(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t color) {
-  int32_t dx = __mp_gfx_abs((x1 - x0));
-  int32_t dy = __mp_gfx_abs((y1 - y0));
-  int32_t sx = __mp_gfx_sign((x1 - x0));
-  int32_t sy = __mp_gfx_sign((y1 - y0));
-  int32_t err = (dx - dy);
-  int32_t cx = x0;
-  int32_t cy = y0;
-  while (true) {
-    if (((((cx >= 0) && (cx < this->width)) && (cy >= 0)) && (cy < this->height))) {
-      Canvas__set_pixel(this, cx, cy, color);
-    }
-    if (((cx == x1) && (cy == y1))) {
-      return;
-    }
-    int32_t e2 = (err * 2);
-    if ((e2 > (-dy))) {
-      (err -= dy);
-      (cx += sx);
-    }
-    if ((e2 < dx)) {
-      (err += dx);
-      (cy += sy);
-    }
-  }
-}
-
-static void Canvas__set_pixel_rgb565(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  int32_t idx = (((y * this->width) + x) * 2);
-  (this->buf.ptr[idx] = ((uint8_t)((color >> 8))));
-  (this->buf.ptr[(idx + 1)] = ((uint8_t)(color)));
-}
-
-static void Canvas__set_pixel_mono(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  int32_t idx = ((y * ((this->width + 7) / 8)) + (x / 8));
-  if ((color != 0)) {
-    (this->buf.ptr[idx] = (this->buf.ptr[idx] | ((uint8_t)((0x80 >> (x & 7))))));
-  } else {
-    (this->buf.ptr[idx] = (this->buf.ptr[idx] & ((uint8_t)((~(0x80 >> (x & 7)))))));
-  }
-}
-
 static void Canvas__set_pixel_index1(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  int32_t idx = ((y * ((this->width + 7) / 8)) + (x / 8));
+  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+    return;
+  }
+  int32_t lx = (x - this->_viewpoint.x);
+  int32_t ly = (y - this->_viewpoint.y);
+  int32_t index = ((ly * ((this->_viewpoint.width + 7) / 8)) + (lx / 8));
   if (((color & 1) != 0)) {
-    (this->buf.ptr[idx] = (this->buf.ptr[idx] | ((uint8_t)((0x80 >> (x & 7))))));
+    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] | ((uint8_t)((0x80 >> (lx & 7))))));
   } else {
-    (this->buf.ptr[idx] = (this->buf.ptr[idx] & ((uint8_t)((~(0x80 >> (x & 7)))))));
+    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] & ((uint8_t)((~(0x80 >> (lx & 7)))))));
   }
 }
 
 static void Canvas__set_pixel_index2(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  int32_t idx = (((y * this->width) + x) / 4);
-  int32_t shift = ((3 - (x & 3)) * 2);
-  (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)((~(0x03 << shift))))) | ((uint8_t)(((color & 0x03) << shift)))));
+  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+    return;
+  }
+  int32_t lx = (x - this->_viewpoint.x);
+  int32_t ly = (y - this->_viewpoint.y);
+  int32_t index = ((ly * ((this->_viewpoint.width + 3) / 4)) + (lx / 4));
+  int32_t shift = ((3 - (lx & 3)) * 2);
+  (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)((~(0x03 << shift))))) | ((uint8_t)(((color & 0x03) << shift)))));
 }
 
 static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  int32_t idx = (((y * this->width) + x) / 2);
-  if (((x & 1) == 0)) {
-    (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)(0x0F))) | ((uint8_t)((color << 4)))));
+  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+    return;
+  }
+  int32_t lx = (x - this->_viewpoint.x);
+  int32_t ly = (y - this->_viewpoint.y);
+  int32_t index = ((ly * ((this->_viewpoint.width + 1) / 2)) + (lx / 2));
+  if (((lx & 1) == 0)) {
+    (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)(0x0F))) | ((uint8_t)((color << 4)))));
   } else {
-    (this->buf.ptr[idx] = ((this->buf.ptr[idx] & ((uint8_t)(0xF0))) | ((uint8_t)((color & 0x0F)))));
+    (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)(0xF0))) | ((uint8_t)((color & 0x0F)))));
   }
 }
 
 static void Canvas__set_pixel_index8(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  (this->buf.ptr[((y * this->width) + x)] = ((uint8_t)(color)));
+  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+    return;
+  }
+  int32_t lx = (x - this->_viewpoint.x);
+  int32_t ly = (y - this->_viewpoint.y);
+  (this->_buffer.ptr[((ly * this->_viewpoint.width) + lx)] = ((uint8_t)(color)));
+}
+
+static void Canvas__render_index1(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
+  for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = ((y - this->_viewpoint.y) - offset->y);
+    for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
+      int32_t lx = ((x - this->_viewpoint.x) - offset->x);
+      int32_t index = ((ly * ((this->_viewpoint.width + 7) / 8)) + (lx / 8));
+      uint16_t color = this->_palette.ptr[0];
+      if (((this->_buffer.ptr[index] & ((uint8_t)((0x80 >> (lx & 7))))) != 0)) {
+        (color = this->_palette.ptr[1]);
+      }
+      if ((color != palette__TRANSPARENT)) {
+        Point point = (Point){x, y};
+        RenderContext_set_pixel(context, (&point), color);
+      }
+    }
+  }
+}
+
+static void Canvas__render_index2(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
+  for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = ((y - this->_viewpoint.y) - offset->y);
+    for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
+      int32_t lx = ((x - this->_viewpoint.x) - offset->x);
+      int32_t index = ((ly * ((this->_viewpoint.width + 3) / 4)) + (lx / 4));
+      int32_t shift = ((3 - (lx & 3)) * 2);
+      uint16_t color = this->_palette.ptr[((((int32_t)(this->_buffer.ptr[index])) >> shift) & 0x03)];
+      if ((color != palette__TRANSPARENT)) {
+        Point point = (Point){x, y};
+        RenderContext_set_pixel(context, (&point), color);
+      }
+    }
+  }
+}
+
+static void Canvas__render_index4(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
+  for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = ((y - this->_viewpoint.y) - offset->y);
+    for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
+      int32_t lx = ((x - this->_viewpoint.x) - offset->x);
+      int32_t index = ((ly * ((this->_viewpoint.width + 1) / 2)) + (lx / 2));
+      uint8_t palette_index = (this->_buffer.ptr[index] & 0x0F);
+      if (((lx & 1) == 0)) {
+        (palette_index = ((this->_buffer.ptr[index] >> 4) & 0x0F));
+      }
+      uint16_t color = this->_palette.ptr[palette_index];
+      if ((color != palette__TRANSPARENT)) {
+        Point point = (Point){x, y};
+        RenderContext_set_pixel(context, (&point), color);
+      }
+    }
+  }
+}
+
+static void Canvas__render_index8(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
+  for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = ((y - this->_viewpoint.y) - offset->y);
+    for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
+      int32_t lx = ((x - this->_viewpoint.x) - offset->x);
+      uint16_t color = this->_palette.ptr[this->_buffer.ptr[((ly * this->_viewpoint.width) + lx)]];
+      if ((color != palette__TRANSPARENT)) {
+        Point point = (Point){x, y};
+        RenderContext_set_pixel(context, (&point), color);
+      }
+    }
+  }
 }
 
 static inline int32_t Canvas__abs(Canvas* this, int32_t v) {
@@ -1559,7 +1097,7 @@ static inline int32_t Canvas__sign(Canvas* this, int32_t v) {
   return 0;
 }
 
-static inline int32_t Canvas__isqrt(Canvas* this, int32_t n) {
+static inline int32_t Canvas__sqrt(Canvas* this, int32_t n) {
   if ((n <= 0)) {
     return 0;
   }
@@ -1572,21 +1110,120 @@ static inline int32_t Canvas__isqrt(Canvas* this, int32_t n) {
   return x;
 }
 
-void Palette_set(Palette* this, int32_t index, uint16_t rgb565) {
-  if (((index >= 0) && (index < ((int32_t)(this->colors.size))))) {
-    (this->colors.ptr[index] = rgb565);
+static inline int32_t math__floor_q16(int32_t value) {
+  return (value & (-65536));
+}
+
+static inline int32_t math__ceil_q16(int32_t value) {
+  int32_t result = (value & (-65536));
+  if ((value != result)) {
+    return (result + 65536);
+  }
+  return result;
+}
+
+static inline int32_t math__round_q16(int32_t value) {
+  return ((value + 32768) & (-65536));
+}
+
+static inline int32_t math__floor_fixed(int32_t value) {
+  return (value & (-65536));
+}
+
+static inline int32_t math__ceil_fixed(int32_t value) {
+  int32_t result = (value & (-65536));
+  if ((value != result)) {
+    return (result + 65536);
+  }
+  return result;
+}
+
+static inline int32_t math__round_fixed(int32_t value) {
+  return ((value + 32768) & (-65536));
+}
+
+static inline bool RenderContext_intersect(RenderContext* this, Rect rect) {
+  return Rect_intersect((&this->viewpoint), rect);
+}
+
+void RenderContext_set_pixel(RenderContext* this, Point* point, int32_t color) {
+  if ((!Rect_contains((&this->viewpoint), point))) {
+    return;
+  }
+  int32_t px = (point->x - this->viewpoint.x);
+  int32_t py = (point->y - this->viewpoint.y);
+  if ((this->format == PixelFormat_Mono)) {
+    RenderContext__set_pixel_mono(this, px, py, color);
+  } else {
+    RenderContext__set_pixel_rgb565(this, px, py, color);
   }
 }
 
-uint16_t Palette_get(Palette* this, int32_t index) {
-  if (((index >= 0) && (index < ((int32_t)(this->colors.size))))) {
-    return this->colors.ptr[index];
+void RenderContext_fill_rect(RenderContext* this, Rect* rect, int32_t color) {
+  int32_t py = rect->y;
+  for (int32_t py = rect->y; py < (rect->y + rect->height); py++) {
+    if (((py >= this->viewpoint.y) && (py < (this->viewpoint.y + this->viewpoint.height)))) {
+      for (int32_t px = rect->x; px < (rect->x + rect->width); px++) {
+        if ((this->format == PixelFormat_Mono)) {
+          RenderContext__set_pixel_mono(this, px, (py - this->viewpoint.y), color);
+        } else {
+          RenderContext__set_pixel_rgb565(this, px, (py - this->viewpoint.y), color);
+        }
+        (px += 1);
+      }
+    }
   }
-  return ((uint16_t)(0));
+}
+
+static inline void RenderContext__set_pixel_mono(RenderContext* this, int32_t x, int32_t y, int32_t color) {
+  int32_t index = (((y * (this->viewpoint.width + 7)) / 8) + (x / 8));
+  if ((color == 0)) {
+    (this->buffer.ptr[index] = (this->buffer.ptr[index] & ((uint8_t)((~(0x80 >> (x & 7)))))));
+  } else {
+    (this->buffer.ptr[index] = (this->buffer.ptr[index] | ((uint8_t)((0x80 >> (x & 7))))));
+  }
+}
+
+static inline void RenderContext__set_pixel_rgb565(RenderContext* this, int32_t x, int32_t y, int32_t color) {
+  int32_t index = (((y * this->viewpoint.width) + x) * 2);
+  (this->buffer.ptr[index] = ((uint8_t)((color >> 8))));
+  (this->buffer.ptr[(index + 1)] = ((uint8_t)(color)));
+}
+
+static inline void memory__memory_zero(__Slice_uint8_t dst, int32_t size) {
+  memset(dst, ((uint8_t)(0)), size);
+}
+
+void gpio__gpio_mode(int32_t pin, GpioMode mode) {
+  gpio_reset_pin(pin);
+  if ((mode == GpioMode_INPUT_PULLUP)) {
+    gpio_set_direction(pin, ((int32_t)(GpioMode_INPUT)));
+    gpio_set_pull_mode(pin, 0);
+  } else if ((mode == GpioMode_INPUT_PULLDOWN)) {
+    gpio_set_direction(pin, ((int32_t)(GpioMode_INPUT)));
+    gpio_set_pull_mode(pin, 1);
+  } else {
+    gpio_set_direction(pin, ((int32_t)(mode)));
+  }
+}
+
+static inline void gpio__gpio_write(int32_t pin, GpioLevel value) {
+  gpio_set_level(pin, ((int32_t)(value)));
+}
+
+static inline GpioLevel gpio__gpio_read(int32_t pin) {
+  return ((GpioLevel)(gpio_get_level(pin)));
 }
 
 static inline int32_t math__min_int32_t(int32_t a, int32_t b) {
   if ((a < b)) {
+    return a;
+  }
+  return b;
+}
+
+static inline int32_t math__max_int32_t(int32_t a, int32_t b) {
+  if ((a > b)) {
     return a;
   }
   return b;
