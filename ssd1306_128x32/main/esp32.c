@@ -1250,7 +1250,7 @@ void RenderContext_fill_rect(RenderContext* this, Rect* rect, uint16_t color) {
 }
 
 static inline void RenderContext__set_pixel_mono(RenderContext* this, int32_t x, int32_t y, uint16_t color) {
-  int32_t index = (((y * (this->viewpoint.width + 7)) / 8) + (x / 8));
+  int32_t index = ((y * ((this->viewpoint.width + 7) / 8)) + (x / 8));
   if ((color == 0)) {
     (this->buffer.ptr[index] = (this->buffer.ptr[index] & ((uint8_t)((~(0x80 >> (x & 7)))))));
   } else {
