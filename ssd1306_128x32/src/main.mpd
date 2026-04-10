@@ -1,15 +1,18 @@
 import i2c::*
-import gfx::*
-import math::min
-import rtos::*
+import graphics::*
+import geometry::*
 import display::*
-import drivers.ssd1306_128x32::*
+import drivers.ssd1306::*
+import node.canvas::*
+import palette::*
+import mcu32.allocator::Allocator
 
-const MESSAGE: u8[] = "Hello, world!             "
-const TOTAL_CHARS: i32 = 13
+const HEAP_SIZE: int = 1600
 
-// Strip buffer: 128×32 Mono = 512 bytes (row-major, 16 bytes/row)
-var _strip_buf: u8[512]
+var _heap:   u8[HEAP_SIZE]
+var _strip:  u8[512]
+var _driver: GraphicsDriver
+var _gfx:    Graphics
 
 fun main()
     val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
@@ -18,27 +21,19 @@ fun main()
     val conn: &DisplayConn = display_conn()
     conn.interface      = DisplayInterface.I2C
     conn.device         = dev
+    conn.dc_pin         = -1
     conn.reset_pin      = -1
     conn.back_light_pin = -1
-    display_attach_gfx(gfx_driver())
-    gfx_set_strip({&_strip_buf[0], 512}, PixelFormat.Mono)
-    gfx_init()
 
-    gfx_clear(0)
-    gfx_rect(0, 0, 128, 32, 1)
+    var alloc: Allocator
+    alloc.init({&_heap[0], HEAP_SIZE})
+    attach_ssd1306_128x32(&_driver, &alloc)
 
-    var location: i32 = 0
-    var first_char: i32 = 0
-    var x: i32 = 0
-    while true
-        if location < 0
-            first_char = -location
-            x = 4
-        else
-            first_char = 0
-            x = location * 9 + 4
-        gfx_str(x, 12, {&MESSAGE[first_char], min<i32>(TOTAL_CHARS - location, TOTAL_CHARS)}, 1, 0, 1)
-        location -= 1
-        if location < -TOTAL_CHARS
-            location = TOTAL_CHARS - 1
-        delay_ms(200)
+    var rect: Rect = { 0, 0, 128, 32 }
+    val canvas: &Canvas = create_canvas(&alloc, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
+    canvas.clear()
+    canvas.draw_rect(0, 0, 128, 32, 1)
+
+    _gfx.init(&_driver, {&_strip[0], 512}, {null, 0}, PixelFormat.Mono, 0, Rotation.R0, false)
+    _gfx.set_root(canvas.get_node())
+    _gfx.render()
