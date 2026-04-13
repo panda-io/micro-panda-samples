@@ -388,9 +388,9 @@ static inline int32_t math__max_int32_t(int32_t a, int32_t b);
 static inline Canvas* Allocator_allocate_Canvas(Allocator* this);
 static inline __Slice_uint8_t Allocator_allocate_array_uint8_t(Allocator* this, int32_t length);
 
-const int32_t main__ALLOCATOR_SIZE = 1024;
+const int32_t main__ALLOCATOR_SIZE = 2048;
 static Allocator main___allocator;
-static uint8_t main___allocator_buffer[1024];
+static uint8_t main___allocator_buffer[2048];
 static SSD1306_128x32 main___driver;
 static Graphics main___gfx;
 const uint16_t palette__TRANSPARENT = 0x0020;
@@ -411,12 +411,12 @@ void main__main(void) {
   (conn.dc_pin = (-1));
   (conn.reset_pin = (-1));
   (conn.back_light_pin = (-1));
-  Allocator_init((&main___allocator), (__Slice_uint8_t){main___allocator_buffer, 1024});
+  Allocator_init((&main___allocator), (__Slice_uint8_t){main___allocator_buffer, 2048});
   drivers__ssd1306__attach_ssd1306_128x32((&main___driver), (&conn));
-  Rect rect = (Rect){32, 8, 64, 16};
+  Rect rect = (Rect){0, 0, 128, 32};
   Canvas* canvas = widget__canvas__create_canvas((&main___allocator), (&rect), 0, IndexFormat_Index1, (__Slice_uint16_t){palette__PALETTE_MONO, 2});
   Canvas_clear(canvas);
-  Canvas_draw_rect(canvas, 0, 0, 64, 16, MonoColor_On);
+  Canvas_draw_rect(canvas, 0, 0, 128, 32, MonoColor_On);
   Graphics_init((&main___gfx), SSD1306_128x32_get_driver((&main___driver)), PixelFormat_Mono, 0, Rotation_R0, false);
   Graphics_set_root((&main___gfx), Canvas_get_node(canvas));
   Graphics_render((&main___gfx));

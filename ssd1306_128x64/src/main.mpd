@@ -3,17 +3,17 @@ import graphics::*
 import geometry::*
 import display::*
 import drivers.ssd1306::*
-import node.canvas::*
+import widget.canvas::*
 import palette::*
 import rtos::*
 import mcu32.allocator::Allocator
 
-const HEAP_SIZE: int = 2048
+const ALLOCATOR_SIZE: int = 1024
 
-var _heap:   u8[HEAP_SIZE]
-var _strip:  u8[1024]
-var _driver: Ssd1306
-var _gfx:    Graphics
+var _allocator:          Allocator
+var _allocator_buffer:   u8[ALLOCATOR_SIZE]
+var _driver:             SSD1306_128x64
+var _gfx:                Graphics
 
 fun main()
     val bus: i32 = i2c_init(I2C_BUS, I2C_SDA, I2C_SCL, I2C_FREQ)
@@ -26,17 +26,15 @@ fun main()
     conn.reset_pin      = -1
     conn.back_light_pin = -1
 
-    var alloc: Allocator
-    alloc.init(_heap)
+    _allocator.init(_allocator_buffer)
     attach_ssd1306_128x64(&_driver, &conn)
 
-    var rect: Rect = { 0, 0, 128, 64 }
-    val canvas: &Canvas = create_canvas(&alloc, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
+    var rect: Rect = { 32, 8, 64, 16 }
+    val canvas: &Canvas = create_canvas(&_allocator, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
-    canvas.draw_rect(0, 0, 128, 64, 1)
-    canvas.draw_round_rect(32, 6, 64, 20, 5, 1)
+    canvas.draw_rect(0, 0, 64, 16, MonoColor.On)
 
-    _gfx.init(&_driver.driver, _strip, {null, 0}, PixelFormat.Mono, 0, Rotation.R0, false)
+    _gfx.init(_driver.get_driver(), PixelFormat.Mono, 0, Rotation.R0, false)
     _gfx.set_root(canvas.get_node())
     _gfx.render()
 
