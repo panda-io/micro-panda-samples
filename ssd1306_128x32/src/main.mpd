@@ -8,7 +8,7 @@ import palette::*
 import rtos::*
 import mcu32.allocator::Allocator
 
-const ALLOCATOR_SIZE: int = 2048
+const ALLOCATOR_SIZE: int = 1024
 
 var _allocator:          Allocator
 var _allocator_buffer:   u8[ALLOCATOR_SIZE]

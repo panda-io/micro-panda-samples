@@ -8,7 +8,7 @@ import palette::*
 import rtos::*
 import mcu32.allocator::Allocator
 
-const ALLOCATOR_SIZE: int = 1024
+const ALLOCATOR_SIZE: int = 2048
 
 var _allocator:          Allocator
 var _allocator_buffer:   u8[ALLOCATOR_SIZE]
@@ -29,10 +29,10 @@ fun main()
     _allocator.init(_allocator_buffer)
     attach_ssd1306_128x64(&_driver, &conn)
 
-    var rect: Rect = { 32, 8, 64, 16 }
+    var rect: Rect = { 0, 0, 128, 64 }
     val canvas: &Canvas = create_canvas(&_allocator, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
-    canvas.draw_rect(0, 0, 64, 16, MonoColor.On)
+    canvas.draw_rect(0, 0, 128, 64, MonoColor.On)
 
     _gfx.init(_driver.get_driver(), PixelFormat.Mono, 0, Rotation.R0, false)
     _gfx.set_root(canvas.get_node())
