@@ -242,6 +242,7 @@ struct Allocator {
 };
 
 struct Node {
+  Rect bound;
   void* handle;
   __Fn_void_RenderContext_p_Point_p_void_p renderer;
 };
@@ -255,7 +256,6 @@ struct RenderContext {
 struct Canvas {
   Node _node;
   __Slice_uint8_t _buffer;
-  Rect _viewpoint;
   int32_t _background;
   IndexFormat _index_format;
   __Slice_uint16_t _palette;
@@ -327,11 +327,11 @@ void drivers__ssd1306__attach_ssd1306_128x64(SSD1306_128x64* display, DisplayCon
 GraphicsDriver* SSD1306_128x32_get_driver(SSD1306_128x32* this);
 GraphicsDriver* SSD1306_128x64_get_driver(SSD1306_128x64* this);
 static void SSD1306__set_rotation(SSD1306* this, Rotation r);
-static void SSD1306__blit(SSD1306* this, Rect* rect, __Slice_uint8_t src, int32_t page_start, int32_t page_count);
+static void SSD1306__blit(SSD1306* this, Rect* rect, __Slice_uint8_t src);
 static void SSD1306__flush(SSD1306* this, Rect* rect, __Slice_uint8_t buf);
 static void SSD1306__write_all_pages(SSD1306* this);
-Canvas* node__canvas__create_canvas(Allocator* allocator, Rect* rect, int32_t background, IndexFormat index_format, __Slice_uint16_t palette);
-void node__canvas__render_canvas(RenderContext* context, Point* offset, void* handle);
+Canvas* widget__canvas__create_canvas(Allocator* allocator, Rect* bound, int32_t background, IndexFormat index_format, __Slice_uint16_t palette);
+void widget__canvas__render_canvas(RenderContext* context, Point* offset, void* handle);
 Node* Canvas_get_node(Canvas* this);
 static inline void Canvas_draw_pixel(Canvas* this, int32_t x, int32_t y, int32_t color_index);
 static inline void Canvas_draw_hline(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t color_index);
@@ -346,7 +346,7 @@ void Canvas_draw_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int3
 void Canvas_fill_triangle(Canvas* this, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color_index);
 void Canvas_draw_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color_index);
 void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t r, int32_t color);
-static void Canvas__init(Canvas* this, Allocator* allocator, Rect* rect, int32_t background, IndexFormat index_format, __Slice_uint16_t palette);
+static void Canvas__init(Canvas* this, Allocator* allocator, Rect* bound, int32_t background, IndexFormat index_format, __Slice_uint16_t palette);
 static inline void Canvas__render(Canvas* this, RenderContext* context, Rect* rect, Point* offset);
 static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width, int32_t height, int32_t color);
 static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, int32_t y, int32_t color);
@@ -413,8 +413,8 @@ void main__main(void) {
   (conn.back_light_pin = (-1));
   Allocator_init((&main___allocator), (__Slice_uint8_t){main___allocator_buffer, 1024});
   drivers__ssd1306__attach_ssd1306_128x32((&main___driver), (&conn));
-  Rect rect = (Rect){0, 0, 64, 16};
-  Canvas* canvas = node__canvas__create_canvas((&main___allocator), (&rect), 0, IndexFormat_Index1, (__Slice_uint16_t){palette__PALETTE_MONO, 2});
+  Rect rect = (Rect){32, 8, 64, 16};
+  Canvas* canvas = widget__canvas__create_canvas((&main___allocator), (&rect), 0, IndexFormat_Index1, (__Slice_uint16_t){palette__PALETTE_MONO, 2});
   Canvas_clear(canvas);
   Canvas_draw_rect(canvas, 0, 0, 64, 16, MonoColor_On);
   Graphics_init((&main___gfx), SSD1306_128x32_get_driver((&main___driver)), PixelFormat_Mono, 0, Rotation_R0, false);
@@ -695,27 +695,20 @@ GraphicsDriver* SSD1306_128x64_get_driver(SSD1306_128x64* this) {
 static void SSD1306__set_rotation(SSD1306* this, Rotation r) {
 }
 
-static void SSD1306__blit(SSD1306* this, Rect* rect, __Slice_uint8_t src, int32_t page_start, int32_t page_count) {
+static void SSD1306__blit(SSD1306* this, Rect* rect, __Slice_uint8_t src) {
   int32_t stride = (this->_width >> 3);
   for (int32_t ry = 0; ry < rect->height; ry++) {
-    int32_t abs_y = (rect->y + ry);
-    if (((abs_y >= 0) && (abs_y < this->_height))) {
-      int32_t page = (abs_y >> 3);
-      if (((page >= page_start) && (page < (page_start + page_count)))) {
-        int32_t bit = (abs_y & 7);
-        int32_t row = (ry * stride);
-        for (int32_t rx = 0; rx < rect->width; rx++) {
-          int32_t abs_x = (rect->x + rx);
-          if (((abs_x >= 0) && (abs_x < this->_width))) {
-            int32_t pixel = ((((int32_t)(src.ptr[(row + (abs_x >> 3))])) >> (7 - (abs_x & 7))) & 1);
-            int32_t p = ((1 + (page * this->_width)) + abs_x);
-            if ((pixel != 0)) {
-              (this->_page_buf.ptr[p] = (this->_page_buf.ptr[p] | ((uint8_t)((1 << bit)))));
-            } else {
-              (this->_page_buf.ptr[p] = (this->_page_buf.ptr[p] & ((uint8_t)((~(1 << bit))))));
-            }
-          }
-        }
+    int32_t y = (rect->y + ry);
+    int32_t bit = (y & 7);
+    int32_t row = (ry * stride);
+    int32_t base = (1 + ((y >> 3) * this->_width));
+    for (int32_t rx = 0; rx < rect->width; rx++) {
+      int32_t x = (rect->x + rx);
+      int32_t pixel = ((((int32_t)(src.ptr[(row + (x >> 3))])) >> (7 - (x & 7))) & 1);
+      if ((pixel != 0)) {
+        (this->_page_buf.ptr[(base + x)] = (this->_page_buf.ptr[(base + x)] | ((uint8_t)((1 << bit)))));
+      } else {
+        (this->_page_buf.ptr[(base + x)] = (this->_page_buf.ptr[(base + x)] & ((uint8_t)((~(1 << bit))))));
       }
     }
   }
@@ -727,7 +720,7 @@ static void SSD1306__flush(SSD1306* this, Rect* rect, __Slice_uint8_t buf) {
   for (int32_t i = (1 + (page_start * this->_width)); i < (1 + (page_end * this->_width)); i++) {
     (this->_page_buf.ptr[i] = 0x00);
   }
-  SSD1306__blit(this, rect, buf, page_start, (page_end - page_start));
+  SSD1306__blit(this, rect, buf);
 }
 
 static void SSD1306__write_all_pages(SSD1306* this) {
@@ -747,27 +740,27 @@ static void SSD1306__write_all_pages(SSD1306* this) {
   i2c__i2c_write(this->_device, this->_page_buf, (1 + (total_pages * this->_width)));
 }
 
-Canvas* node__canvas__create_canvas(Allocator* allocator, Rect* rect, int32_t background, IndexFormat index_format, __Slice_uint16_t palette) {
+Canvas* widget__canvas__create_canvas(Allocator* allocator, Rect* bound, int32_t background, IndexFormat index_format, __Slice_uint16_t palette) {
   Canvas* canvas = Allocator_allocate_Canvas(allocator);
-  Canvas__init(canvas, allocator, rect, background, index_format, palette);
+  Canvas__init(canvas, allocator, bound, background, index_format, palette);
   return canvas;
 }
 
-void node__canvas__render_canvas(RenderContext* context, Point* offset, void* handle) {
+void widget__canvas__render_canvas(RenderContext* context, Point* offset, void* handle) {
   Canvas* canvas = ((Canvas*)(handle));
-  Rect viewpoint = {0};
-  (viewpoint.x = (canvas->_viewpoint.x + offset->x));
-  (viewpoint.y = (canvas->_viewpoint.y + offset->y));
-  (viewpoint.width = canvas->_viewpoint.width);
-  (viewpoint.height = canvas->_viewpoint.height);
-  if ((!RenderContext_intersect(context, (&viewpoint)))) {
+  Rect bound = {0};
+  (bound.x = (canvas->_node.bound.x + offset->x));
+  (bound.y = (canvas->_node.bound.y + offset->y));
+  (bound.width = canvas->_node.bound.width);
+  (bound.height = canvas->_node.bound.height);
+  if ((!RenderContext_intersect(context, (&bound)))) {
     return;
   }
-  (viewpoint.x = math__max_int32_t(viewpoint.x, context->viewpoint.x));
-  (viewpoint.y = math__max_int32_t(viewpoint.y, context->viewpoint.y));
-  (viewpoint.width = (math__min_int32_t((viewpoint.x + viewpoint.width), (context->viewpoint.x + context->viewpoint.width)) - viewpoint.x));
-  (viewpoint.height = (math__min_int32_t((viewpoint.y + viewpoint.height), (context->viewpoint.y + context->viewpoint.height)) - viewpoint.y));
-  Canvas__render(canvas, context, (&viewpoint), offset);
+  (bound.x = math__max_int32_t(bound.x, context->viewpoint.x));
+  (bound.y = math__max_int32_t(bound.y, context->viewpoint.y));
+  (bound.width = (math__min_int32_t((bound.x + bound.width), (context->viewpoint.x + context->viewpoint.width)) - bound.x));
+  (bound.height = (math__min_int32_t((bound.y + bound.height), (context->viewpoint.y + context->viewpoint.height)) - bound.y));
+  Canvas__render(canvas, context, (&bound), offset);
 }
 
 Node* Canvas_get_node(Canvas* this) {
@@ -840,7 +833,7 @@ static inline void Canvas_fill_rect(Canvas* this, int32_t x, int32_t y, int32_t 
 }
 
 void Canvas_clear(Canvas* this) {
-  Canvas__fill_rect(this, this->_viewpoint.x, this->_viewpoint.y, this->_viewpoint.width, this->_viewpoint.height, this->_background);
+  Canvas__fill_rect(this, 0, 0, this->_node.bound.width, this->_node.bound.height, this->_background);
 }
 
 void Canvas_draw_circle(Canvas* this, int32_t cx, int32_t cy, int32_t r, int32_t color_index) {
@@ -969,29 +962,29 @@ void Canvas_fill_round_rect(Canvas* this, int32_t x, int32_t y, int32_t width, i
   }
 }
 
-static void Canvas__init(Canvas* this, Allocator* allocator, Rect* rect, int32_t background, IndexFormat index_format, __Slice_uint16_t palette) {
-  Rect_copy((&this->_viewpoint), rect);
+static void Canvas__init(Canvas* this, Allocator* allocator, Rect* bound, int32_t background, IndexFormat index_format, __Slice_uint16_t palette) {
+  Rect_copy((&this->_node.bound), bound);
   (this->_background = background);
   (this->_index_format = index_format);
   (this->_palette = palette);
   int32_t buffer_size = 0;
   if ((index_format == IndexFormat_Index1)) {
-    (buffer_size = (((rect->width + 7) / 8) * rect->height));
+    (buffer_size = (((bound->width + 7) / 8) * bound->height));
   }
   if ((index_format == IndexFormat_Index2)) {
-    (buffer_size = (((rect->width + 3) / 4) * rect->height));
+    (buffer_size = (((bound->width + 3) / 4) * bound->height));
   }
   if ((index_format == IndexFormat_Index4)) {
-    (buffer_size = (((rect->width + 1) / 2) * rect->height));
+    (buffer_size = (((bound->width + 1) / 2) * bound->height));
   }
   if ((index_format == IndexFormat_Index8)) {
-    (buffer_size = (rect->width * rect->height));
+    (buffer_size = (bound->width * bound->height));
   }
   if ((buffer_size > 0)) {
     (this->_buffer = Allocator_allocate_array_uint8_t(allocator, buffer_size));
   }
   (this->_node.handle = ((void*)(this)));
-  (this->_node.renderer = node__canvas__render_canvas);
+  (this->_node.renderer = widget__canvas__render_canvas);
 }
 
 static inline void Canvas__render(Canvas* this, RenderContext* context, Rect* rect, Point* offset) {
@@ -1019,14 +1012,14 @@ static void Canvas__fill_rect(Canvas* this, int32_t x, int32_t y, int32_t width,
   if (((width <= 0) || (height <= 0))) {
     return;
   }
-  bool intersect = ((((x < (this->_viewpoint.x + this->_viewpoint.width)) && ((x + width) > this->_viewpoint.x)) && (y < (this->_viewpoint.y + this->_viewpoint.height))) && ((y + height) > this->_viewpoint.y));
+  bool intersect = ((((x < this->_node.bound.width) && ((x + width) > 0)) && (y < this->_node.bound.height)) && ((y + height) > 0));
   if ((!intersect)) {
     return;
   }
-  int32_t start_x = math__max_int32_t(x, this->_viewpoint.x);
-  int32_t start_y = math__max_int32_t(y, this->_viewpoint.y);
-  int32_t end_x = math__min_int32_t((x + width), (this->_viewpoint.x + this->_viewpoint.width));
-  int32_t end_y = math__min_int32_t((y + height), (this->_viewpoint.y + this->_viewpoint.height));
+  int32_t start_x = math__max_int32_t(x, 0);
+  int32_t start_y = math__max_int32_t(y, 0);
+  int32_t end_x = math__min_int32_t((x + width), this->_node.bound.width);
+  int32_t end_y = math__min_int32_t((y + height), this->_node.bound.height);
   for (int32_t py = start_y; py < end_y; py++) {
     for (int32_t px = start_x; px < end_x; px++) {
       Canvas_draw_pixel(this, px, py, color);
@@ -1046,38 +1039,32 @@ static void Canvas__circle_8(Canvas* this, int32_t cx, int32_t cy, int32_t x, in
 }
 
 static void Canvas__set_pixel_index1(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+  if (((((x < 0) || (y < 0)) || (x >= this->_node.bound.width)) || (y >= this->_node.bound.height))) {
     return;
   }
-  int32_t lx = (x - this->_viewpoint.x);
-  int32_t ly = (y - this->_viewpoint.y);
-  int32_t index = ((ly * ((this->_viewpoint.width + 7) / 8)) + (lx / 8));
+  int32_t index = ((y * ((this->_node.bound.width + 7) / 8)) + (x / 8));
   if (((color & 1) != 0)) {
-    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] | ((uint8_t)((0x80 >> (lx & 7))))));
+    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] | ((uint8_t)((0x80 >> (x & 7))))));
   } else {
-    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] & ((uint8_t)((~(0x80 >> (lx & 7)))))));
+    (this->_buffer.ptr[index] = (this->_buffer.ptr[index] & ((uint8_t)((~(0x80 >> (x & 7)))))));
   }
 }
 
 static void Canvas__set_pixel_index2(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+  if (((((x < 0) || (y < 0)) || (x >= this->_node.bound.width)) || (y >= this->_node.bound.height))) {
     return;
   }
-  int32_t lx = (x - this->_viewpoint.x);
-  int32_t ly = (y - this->_viewpoint.y);
-  int32_t index = ((ly * ((this->_viewpoint.width + 3) / 4)) + (lx / 4));
-  int32_t shift = ((3 - (lx & 3)) * 2);
+  int32_t index = ((y * ((this->_node.bound.width + 3) / 4)) + (x / 4));
+  int32_t shift = ((3 - (x & 3)) * 2);
   (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)((~(0x03 << shift))))) | ((uint8_t)(((color & 0x03) << shift)))));
 }
 
 static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t color) {
-  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+  if (((((x < 0) || (y < 0)) || (x >= this->_node.bound.width)) || (y >= this->_node.bound.height))) {
     return;
   }
-  int32_t lx = (x - this->_viewpoint.x);
-  int32_t ly = (y - this->_viewpoint.y);
-  int32_t index = ((ly * ((this->_viewpoint.width + 1) / 2)) + (lx / 2));
-  if (((lx & 1) == 0)) {
+  int32_t index = ((y * ((this->_node.bound.width + 1) / 2)) + (x / 2));
+  if (((x & 1) == 0)) {
     (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)(0x0F))) | ((uint8_t)((color << 4)))));
   } else {
     (this->_buffer.ptr[index] = ((this->_buffer.ptr[index] & ((uint8_t)(0xF0))) | ((uint8_t)((color & 0x0F)))));
@@ -1085,92 +1072,90 @@ static void Canvas__set_pixel_index4(Canvas* this, int32_t x, int32_t y, int32_t
 }
 
 static void Canvas__set_pixel_index8(Canvas* this, int32_t x, int32_t y, int32_t color_index) {
-  if (((((x < this->_viewpoint.x) || (x >= (this->_viewpoint.x + this->_viewpoint.width))) || (y < this->_viewpoint.y)) || (y >= (this->_viewpoint.y + this->_viewpoint.height)))) {
+  if (((((x < 0) || (y < 0)) || (x >= this->_node.bound.width)) || (y >= this->_node.bound.height))) {
     return;
   }
-  int32_t lx = (x - this->_viewpoint.x);
-  int32_t ly = (y - this->_viewpoint.y);
-  (this->_buffer.ptr[((ly * this->_viewpoint.width) + lx)] = ((uint8_t)(color_index)));
+  (this->_buffer.ptr[((y * this->_node.bound.width) + x)] = ((uint8_t)(color_index)));
 }
 
 static void Canvas__render_index1(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
-  Point canvas_point = {0};
-  Point global_point = {0};
+  int32_t origin_x = (offset->x + this->_node.bound.x);
+  int32_t origin_y = (offset->y + this->_node.bound.y);
+  Point point = {0};
   for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = (y - origin_y);
+    (point.y = y);
     for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
-      (canvas_point.x = (x - offset->x));
-      (canvas_point.y = (y - offset->y));
-      if (Rect_contains((&this->_viewpoint), (&canvas_point))) {
-        (global_point.x = x);
-        (global_point.y = y);
-        int32_t index = ((canvas_point.y * ((this->_viewpoint.width + 7) / 8)) + (canvas_point.x / 8));
-        uint16_t color = this->_palette.ptr[0];
-        if (((this->_buffer.ptr[index] & ((uint8_t)((0x80 >> (canvas_point.x & 7))))) != 0)) {
-          (color = this->_palette.ptr[1]);
-        }
-        if ((color != palette__TRANSPARENT)) {
-          RenderContext_set_pixel(context, (&global_point), color);
-        }
+      int32_t lx = (x - origin_x);
+      int32_t index = ((ly * ((this->_node.bound.width + 7) / 8)) + (lx / 8));
+      uint16_t color = this->_palette.ptr[0];
+      if (((this->_buffer.ptr[index] & ((uint8_t)((0x80 >> (lx & 7))))) != 0)) {
+        (color = this->_palette.ptr[1]);
+      }
+      if ((color != palette__TRANSPARENT)) {
+        (point.x = x);
+        RenderContext_set_pixel(context, (&point), color);
       }
     }
   }
 }
 
 static void Canvas__render_index2(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
-  Point canvas_point = {0};
-  Point global_point = {0};
+  int32_t origin_x = (offset->x + this->_node.bound.x);
+  int32_t origin_y = (offset->y + this->_node.bound.y);
+  Point point = {0};
   for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = (y - origin_y);
+    (point.y = y);
     for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
-      (canvas_point.x = (x - offset->x));
-      (canvas_point.y = (y - offset->y));
-      if (Rect_contains((&this->_viewpoint), (&canvas_point))) {
-        (global_point.x = x);
-        (global_point.y = y);
-        int32_t index = ((canvas_point.y * ((this->_viewpoint.width + 3) / 4)) + (canvas_point.x / 4));
-        int32_t shift = ((3 - (canvas_point.x & 3)) * 2);
-        uint16_t color = this->_palette.ptr[((((int32_t)(this->_buffer.ptr[index])) >> shift) & 0x03)];
-        if ((color != palette__TRANSPARENT)) {
-          RenderContext_set_pixel(context, (&global_point), color);
-        }
+      int32_t lx = (x - origin_x);
+      int32_t index = ((ly * ((this->_node.bound.width + 3) / 4)) + (lx / 4));
+      int32_t shift = ((3 - (lx & 3)) * 2);
+      uint16_t color = this->_palette.ptr[((((int32_t)(this->_buffer.ptr[index])) >> shift) & 0x03)];
+      if ((color != palette__TRANSPARENT)) {
+        (point.x = x);
+        RenderContext_set_pixel(context, (&point), color);
       }
     }
   }
 }
 
 static void Canvas__render_index4(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
-  Point canvas_point = {0};
-  Point global_point = {0};
+  int32_t origin_x = (offset->x + this->_node.bound.x);
+  int32_t origin_y = (offset->y + this->_node.bound.y);
+  Point point = {0};
   for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = (y - origin_y);
+    (point.y = y);
     for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
-      (canvas_point.x = (x - offset->x));
-      (canvas_point.y = (y - offset->y));
-      if (Rect_contains((&this->_viewpoint), (&canvas_point))) {
-        int32_t index = ((canvas_point.y * ((this->_viewpoint.width + 1) / 2)) + (canvas_point.x / 2));
-        uint8_t palette_index = (this->_buffer.ptr[index] & 0x0F);
-        if (((canvas_point.x & 1) == 0)) {
-          (palette_index = ((this->_buffer.ptr[index] >> 4) & 0x0F));
-        }
-        uint16_t color = this->_palette.ptr[palette_index];
-        if ((color != palette__TRANSPARENT)) {
-          RenderContext_set_pixel(context, (&global_point), color);
-        }
+      int32_t lx = (x - origin_x);
+      int32_t index = ((ly * ((this->_node.bound.width + 1) / 2)) + (lx / 2));
+      uint8_t palette_index = (this->_buffer.ptr[index] & 0x0F);
+      if (((lx & 1) == 0)) {
+        (palette_index = ((this->_buffer.ptr[index] >> 4) & 0x0F));
+      }
+      uint16_t color = this->_palette.ptr[palette_index];
+      if ((color != palette__TRANSPARENT)) {
+        (point.x = x);
+        RenderContext_set_pixel(context, (&point), color);
       }
     }
   }
 }
 
 static void Canvas__render_index8(Canvas* this, RenderContext* context, Rect* viewpoint, Point* offset) {
-  Point canvas_point = {0};
-  Point global_point = {0};
+  int32_t origin_x = (offset->x + this->_node.bound.x);
+  int32_t origin_y = (offset->y + this->_node.bound.y);
+  Point point = {0};
   for (int32_t y = viewpoint->y; y < (viewpoint->y + viewpoint->height); y++) {
+    int32_t ly = (y - origin_y);
+    (point.y = y);
     for (int32_t x = viewpoint->x; x < (viewpoint->x + viewpoint->width); x++) {
-      (canvas_point.x = (x - offset->x));
-      (canvas_point.y = (y - offset->y));
-      if (Rect_contains((&this->_viewpoint), (&canvas_point))) {
-        uint16_t color = this->_palette.ptr[this->_buffer.ptr[((canvas_point.y * this->_viewpoint.width) + canvas_point.x)]];
-        if ((color != palette__TRANSPARENT)) {
-          RenderContext_set_pixel(context, (&global_point), color);
-        }
+      int32_t lx = (x - origin_x);
+      uint16_t color = this->_palette.ptr[this->_buffer.ptr[((ly * this->_node.bound.width) + lx)]];
+      if ((color != palette__TRANSPARENT)) {
+        (point.x = x);
+        RenderContext_set_pixel(context, (&point), color);
       }
     }
   }

@@ -3,7 +3,7 @@ import graphics::*
 import geometry::*
 import display::*
 import drivers.ssd1306::*
-import node.canvas::*
+import widget.canvas::*
 import palette::*
 import rtos::*
 import mcu32.allocator::Allocator
@@ -29,7 +29,7 @@ fun main()
     _allocator.init(_allocator_buffer)
     attach_ssd1306_128x32(&_driver, &conn)
 
-    var rect: Rect = { 0, 0, 64, 16 }
+    var rect: Rect = { 32, 8, 64, 16 }
     val canvas: &Canvas = create_canvas(&_allocator, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
     canvas.draw_rect(0, 0, 64, 16, MonoColor.On)
