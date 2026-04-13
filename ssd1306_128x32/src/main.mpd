@@ -29,10 +29,10 @@ fun main()
     _allocator.init(_allocator_buffer)
     attach_ssd1306_128x32(&_driver, &conn)
 
-    var rect: Rect = { 0, 0, 128, 32 }
+    var rect: Rect = { 0, 0, 64, 16 }
     val canvas: &Canvas = create_canvas(&_allocator, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
-    canvas.draw_rect(0, 0, 128, 32, 1)
+    canvas.draw_rect(0, 0, 64, 16, MonoColor.On)
     //canvas.draw_round_rect(32, 6, 64, 20, 5, 1)
 
     _gfx.init(_driver.get_driver(), PixelFormat.Mono, 0, Rotation.R0, false)
