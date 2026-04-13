@@ -1,0 +1,18 @@
+name: ssd1306_128x32
+version: 0.1.0
+
+deps:
+  - git@github.com:panda-io/micro-panda-esp32.git@latest
+  - git@github.com:panda-io/micro-panda-gfx.git@latest
+  - git@github.com:panda-io/micro-panda-display.git@latest
+
+targets:
+  esp32:
+    entry: main
+    src: src/
+    type: c
+    out: main/esp32.c
+    config: esp32.yaml
+    flags: [ESP32, MCU32]
+    gen:
+      entry: app_main
