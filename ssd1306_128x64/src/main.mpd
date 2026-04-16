@@ -32,7 +32,8 @@ fun main()
     var rect: Rect = { 0, 0, 128, 64 }
     val canvas: &Canvas = create_canvas(&_allocator, &rect, 0, IndexFormat.Index1, PALETTE_MONO)
     canvas.clear()
-    canvas.draw_rect(0, 0, 128, 64, MonoColor.On)
+    canvas.draw_rect(0, 0, 128, 16, MonoColor.On)
+    canvas.draw_rect(0, 16, 128, 48, MonoColor.On)
 
     _gfx.init(_driver.get_driver(), PixelFormat.Mono, 0, Rotation.R0, false)
     _gfx.set_root(canvas.get_node())
